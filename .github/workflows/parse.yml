@@ -10,6 +10,7 @@ jobs:
   parse-cities:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: Production
     strategy:
       matrix:
         city: [perm, sochi]
@@ -57,6 +58,7 @@ jobs:
   trigger-deploy:
     needs: parse-cities
     runs-on: ubuntu-latest
+    environment: Production
     steps:
       - name: Trigger Vercel rebuild
         env:
