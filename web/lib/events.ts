@@ -67,10 +67,13 @@ function rowToEvent(r: EventRow): EventItem {
 }
 
 export async function getEventsByCity(city: City): Promise<EventItem[]> {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
   const { data, error } = await supabase
     .from("events")
     .select("*")
     .eq("city", city)
+    .or(`date.eq.always,date.gte.${today}`)
     .order("date", { ascending: true });
 
   if (error) {
