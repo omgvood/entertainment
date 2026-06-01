@@ -57,6 +57,7 @@ jobs:
 
   trigger-deploy:
     needs: parse-cities
+    if: ${{ !cancelled() && contains(needs.parse-cities.result, 'success') }}
     runs-on: ubuntu-latest
     environment: Production
     steps:
