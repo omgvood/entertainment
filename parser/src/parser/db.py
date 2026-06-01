@@ -26,16 +26,14 @@ class WriteStats:
 
 
 def upsert_events(client: Client, events: list[EventRow]) -> WriteStats:
-    """Upsert по первичному ключу id. Возвращает статистику."""
+    """Upsert по slug (естественный уникальный ключ события). Возвращает статистику."""
     stats = WriteStats()
     if not events:
         return stats
 
-    # supabase-py upsert работает пачкой. Чтобы получить точный inserted vs updated —
-    # это не отдаёт PostgREST на default-настройках. Считаем всё как «записано».
     payload = [e.model_dump(mode="json") for e in events]
     try:
-        resp = client.table("events").upsert(payload, on_conflict="id").execute()
+        resp = client.table("events").upsert(payload, on_conflict="slug").execute()
         stats.inserted = len(resp.data or [])
         log.info("db.upsert.ok", count=stats.inserted)
     except Exception as exc:  # noqa: BLE001
