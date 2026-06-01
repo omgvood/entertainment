@@ -1,0 +1,66 @@
+# Источники событий по городам.
+#
+# extraction_mode:
+#   per_url         — дискавер N URL → N LLM-вызовов на каждое событие
+#                     требует: kind + url + (опц.) url_pattern
+#   batch_listing   — скачиваем url целиком и одним LLM-вызовом извлекаем все события
+#                     требует: kind + url
+#   direct_api      — вызываем API провайдера и маппим JSON → ParsedEvent напрямую (без LLM)
+#                     требует: provider + api_query + event_type
+
+cities:
+  sochi:
+    sources:
+      # QuizPlease Сочи
+      - name: quizplease
+        kind: listing
+        url: https://sochi.quizplease.ru/schedule
+        url_pattern: "/game-page\\?id=\\d+"
+        extraction_mode: batch_listing
+
+      # 2ГИС — места «всегда» (Сочи)
+      - name: twogis-bowling
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "боулинг Сочи"
+        event_type: bowling
+
+      - name: twogis-billiards
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "бильярд Сочи"
+        event_type: billiards
+
+      - name: twogis-karting
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "картинг Сочи"
+        event_type: karting
+
+  perm:
+    sources:
+      # QuizPlease: на странице расписания видны все игры → batch_listing
+      - name: quizplease
+        kind: listing
+        url: https://perm.quizplease.ru/schedule
+        url_pattern: "/game-page\\?id=\\d+"   # используется только если --mode per_url
+        extraction_mode: batch_listing
+
+      # 2ГИС — места «всегда» (боулинг/бильярд/картинг)
+      - name: twogis-bowling
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "боулинг Пермь"
+        event_type: bowling
+
+      - name: twogis-billiards
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "бильярд Пермь"
+        event_type: billiards
+
+      - name: twogis-karting
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "картинг Пермь"
+        event_type: karting

@@ -1,0 +1,396 @@
+/* ============================================================
+   Афиша Пермь — прототип Спринта 0
+   Цель: увидеть UX (сетка, карточка, шапка, сайдбар) в браузере
+   ============================================================ */
+
+:root {
+  --bg: #f7f7f9;
+  --surface: #ffffff;
+  --border: #e6e6ec;
+  --text: #1a1a1f;
+  --text-muted: #6b6b78;
+  --accent: #6c4cff;
+  --accent-hover: #5a3eee;
+  --shadow-sm: 0 1px 2px rgba(20, 20, 40, 0.04);
+  --shadow-md: 0 4px 16px rgba(20, 20, 40, 0.08);
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  /* Цвета бейджей по типу события */
+  --badge-quiz-bg: #ede7ff;       --badge-quiz-text: #5a3eee;
+  --badge-standup-bg: #ffe7ee;    --badge-standup-text: #d63672;
+  --badge-bowling-bg: #e7f5ff;    --badge-bowling-text: #1971c2;
+  --badge-billiards-bg: #e7f9ec;  --badge-billiards-text: #2b8a3e;
+  --badge-karting-bg: #fff4e0;    --badge-karting-text: #d97706;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.container {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+/* ---------- Шапка ---------- */
+
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 20px;
+  white-space: nowrap;
+}
+
+.logo-mark { font-size: 24px; }
+.logo-accent { color: var(--accent); }
+
+.city-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.city-selector:hover { border-color: var(--accent); }
+.city-icon { font-size: 14px; }
+.city-arrow { font-size: 10px; color: var(--text-muted); }
+
+.search-box {
+  flex: 1;
+  max-width: 540px;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  background: var(--bg);
+}
+
+.search-box input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+/* ---------- Лейаут ---------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 24px;
+  padding-top: 24px;
+  padding-bottom: 48px;
+}
+
+/* ---------- Сайдбар-фильтры ---------- */
+
+.sidebar {
+  position: sticky;
+  top: 76px;
+  align-self: start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-block {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-block:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.filter-block h3 {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-block label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.filter-block label.disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.badge-soon {
+  font-size: 10px;
+  background: var(--border);
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.price-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.price-row input {
+  width: 70px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.fixed-date-toggle {
+  font-weight: 500;
+}
+
+.hint {
+  margin: 6px 0 0 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- Контент ---------- */
+
+.content-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.content-head h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.count {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* ---------- Сетка карточек ---------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+/* ---------- Карточка события ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.card-image {
+  aspect-ratio: 4 / 3;
+  background-color: #ddd;
+  background-size: cover;
+  background-position: center;
+}
+
+.card-body {
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-quiz       { background: var(--badge-quiz-bg);      color: var(--badge-quiz-text); }
+.badge-standup    { background: var(--badge-standup-bg);   color: var(--badge-standup-text); }
+.badge-bowling    { background: var(--badge-bowling-bg);   color: var(--badge-bowling-text); }
+.badge-billiards  { background: var(--badge-billiards-bg); color: var(--badge-billiards-text); }
+.badge-karting    { background: var(--badge-karting-bg);   color: var(--badge-karting-text); }
+
+.card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  /* обрезаем длинные названия */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: auto;
+}
+
+.card-meta small { font-size: 11px; opacity: 0.85; }
+
+/* ---------- Пагинация ---------- */
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 32px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.pagination button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---------- Футер ---------- */
+
+.footer {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 20px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ============================================================
+   АДАПТИВНОСТЬ
+   ============================================================ */
+
+/* Десктоп уменьшается — 3 колонки */
+@media (max-width: 1199px) {
+  .grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Планшет — сайдбар уезжает вниз, 3 колонки */
+@media (max-width: 1023px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: static;
+    order: 2;
+  }
+  .content { order: 1; }
+  .grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Узкий планшет — 2 колонки */
+@media (max-width: 767px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .content-head h1 { font-size: 22px; }
+  .header-inner {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .search-box {
+    order: 3;
+    width: 100%;
+    max-width: none;
+  }
+}
+
+/* Мобильный — 2 колонки сохраняем (как в WB/Ozon), карточки чуть компактнее */
+@media (max-width: 480px) {
+  .card-title { font-size: 14px; }
+  .card-body { padding: 10px 12px 14px; }
+  .card-meta { font-size: 12px; }
+  .container { padding: 0 12px; }
+}

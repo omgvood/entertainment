@@ -1,0 +1,23 @@
+# Python parser
+parser/__pycache__/
+parser/*.pyc
+parser/.pytest_cache/
+parser/.venv/
+parser/venv/
+*.pyc
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files (никогда не коммитить!)
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Editors
+.vscode/
+.idea/
+*.swp

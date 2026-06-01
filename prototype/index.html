@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Афиша Пермь — куда сходить сегодня и на выходных</title>
+  <meta name="description" content="Все мероприятия в Перми: квизы, стендапы, боулинг, бильярд, картинг. Расписание, цены, адреса. Выберите досуг под себя.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="header">
+  <div class="container header-inner">
+    <a href="/" class="logo">
+      <span class="logo-mark">🎟</span>
+      <span class="logo-text">Афиша<span class="logo-accent">.PRM</span></span>
+    </a>
+
+    <button class="city-selector" type="button" title="Сменить город">
+      <span class="city-icon">📍</span>
+      <span>Пермь</span>
+      <span class="city-arrow">▾</span>
+    </button>
+
+    <div class="search-box">
+      <input type="search" placeholder="Поиск по названию, площадке, организатору…">
+    </div>
+  </div>
+</header>
+
+<div class="container layout">
+
+  <aside class="sidebar">
+    <div class="filter-block">
+      <h3>Тип</h3>
+      <label><input type="checkbox" checked> Квизы</label>
+      <label><input type="checkbox" checked> Стендап</label>
+      <label><input type="checkbox" checked> Боулинг</label>
+      <label><input type="checkbox" checked> Бильярд</label>
+      <label><input type="checkbox" checked> Картинг</label>
+    </div>
+
+    <div class="filter-block">
+      <h3>Когда</h3>
+      <label><input type="radio" name="when"> Сегодня</label>
+      <label><input type="radio" name="when"> Завтра</label>
+      <label><input type="radio" name="when"> Эти выходные</label>
+      <label><input type="radio" name="when" checked> Любая дата</label>
+    </div>
+
+    <div class="filter-block">
+      <h3>Цена</h3>
+      <div class="price-row">
+        <input type="number" placeholder="от" value="0"> —
+        <input type="number" placeholder="до" value="5000"> ₽
+      </div>
+    </div>
+
+    <div class="filter-block">
+      <h3>Район <span class="badge-soon">скоро</span></h3>
+      <label class="disabled"><input type="checkbox" disabled> Центр</label>
+      <label class="disabled"><input type="checkbox" disabled> Мотовилиха</label>
+      <label class="disabled"><input type="checkbox" disabled> Индустриальный</label>
+    </div>
+
+    <div class="filter-block">
+      <label class="fixed-date-toggle">
+        <input type="checkbox" checked>
+        Только с фиксированной датой
+      </label>
+      <p class="hint">Скрыть боулинг/бильярд/картинг при поиске «сегодня вечером»</p>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="content-head">
+      <h1>Куда сходить в Перми</h1>
+      <p class="count">Найдено: <strong>10 событий</strong></p>
+    </div>
+
+    <div class="grid">
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/quiz1/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-quiz">Квиз</span>
+          <h2 class="card-title">QuizPlease «Классика» в баре Сезон</h2>
+          <div class="card-meta">
+            <span>📅 1 июня, 19:00</span>
+            <span>💰 от 800 ₽ <small>за команду</small></span>
+            <span>📍 ул. Куйбышева, 14</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/quiz2/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-quiz">Квиз</span>
+          <h2 class="card-title">Мозгобойня «Игры разума» в баре Соль</h2>
+          <div class="card-meta">
+            <span>📅 3 июня, 19:30</span>
+            <span>💰 от 500 до 700 ₽</span>
+            <span>📍 ул. Сибирская, 8</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/standup1/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-standup">Стендап</span>
+          <h2 class="card-title">Открытый микрофон в Standup Club Perm</h2>
+          <div class="card-meta">
+            <span>📅 2 июня, 20:00</span>
+            <span>💰 от 300 до 500 ₽</span>
+            <span>📍 ул. Газеты Звезда, 27</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/standup2/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-standup">Стендап</span>
+          <h2 class="card-title">Денис Чужой — сольный концерт</h2>
+          <div class="card-meta">
+            <span>📅 15 июня, 20:00</span>
+            <span>💰 от 1 500 до 3 500 ₽</span>
+            <span>📍 ДК Солдатова</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/bowl1/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-bowling">Боулинг</span>
+          <h2 class="card-title">Боулинг «Капитан» в ТРК СпешиLOVE</h2>
+          <div class="card-meta">
+            <span>📅 ежедневно</span>
+            <span>💰 от 300 до 600 ₽ <small>за дорожку/час</small></span>
+            <span>📍 шоссе Космонавтов, 65</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/bowl2/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-bowling">Боулинг</span>
+          <h2 class="card-title">Bowl Hall</h2>
+          <div class="card-meta">
+            <span>📅 ежедневно</span>
+            <span>💰 от 400 до 800 ₽ <small>за дорожку/час</small></span>
+            <span>📍 ул. Ленина, 45</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/bil1/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-billiards">Бильярд</span>
+          <h2 class="card-title">Бильярдный клуб «8 шар»</h2>
+          <div class="card-meta">
+            <span>📅 ежедневно</span>
+            <span>💰 от 250 до 450 ₽ <small>за стол/час</small></span>
+            <span>📍 ул. Революции, 13</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/kart1/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-karting">Картинг</span>
+          <h2 class="card-title">Forsage Karting</h2>
+          <div class="card-meta">
+            <span>📅 ежедневно</span>
+            <span>💰 от 700 до 1 200 ₽ <small>за заезд</small></span>
+            <span>📍 ул. Героев Хасана, 105</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/kart2/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-karting">Картинг</span>
+          <h2 class="card-title">Картинг-центр Maxi</h2>
+          <div class="card-meta">
+            <span>📅 ежедневно</span>
+            <span>💰 от 500 до 900 ₽ <small>за заезд</small></span>
+            <span>📍 ул. Промышленная, 84</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-image" style="background-image: url('https://picsum.photos/seed/quiz3/400/300')"></div>
+        <div class="card-body">
+          <span class="badge badge-quiz">Квиз</span>
+          <h2 class="card-title">Яндекс.Игры в Гачо</h2>
+          <div class="card-meta">
+            <span>📅 8 июня, 19:00</span>
+            <span>💰 от 600 до 900 ₽ <small>за команду</small></span>
+            <span>📍 ул. Монастырская, 12А</span>
+          </div>
+        </div>
+      </article>
+
+    </div>
+
+    <nav class="pagination">
+      <button disabled>← Назад</button>
+      <span>1 из 1</span>
+      <button disabled>Вперёд →</button>
+    </nav>
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="container">
+    <p>Афиша Пермь · прототип Спринта 0 · 2026</p>
+  </div>
+</footer>
+
+</body>
+</html>
