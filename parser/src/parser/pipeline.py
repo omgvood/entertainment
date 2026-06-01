@@ -12,7 +12,7 @@ import structlog
 from supabase import Client
 
 from .config import CityConfig, SourceConfig
-from .db import WriteStats, upsert_events
+from .db import WriteStats, cleanup_old_events, upsert_events
 from .dedup import filter_new_urls
 from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor
@@ -109,6 +109,7 @@ async def run_city(
         else:
             stats: WriteStats = upsert_events(supabase, all_rows)
             result.written = stats.inserted
+            cleanup_old_events(supabase, city.slug)
 
     return result
 
