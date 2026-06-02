@@ -64,3 +64,10 @@ cities:
         provider: twogis
         api_query: "картинг Пермь"
         event_type: karting
+
+      # DeepSeek тестовый источник (раскомментировать для локального тестирования)
+      # - name: quizplease-deepseek-test
+      #   kind: listing
+      #   url: https://perm.quizplease.ru/schedule
+      #   extraction_mode: batch_listing
+      #   provider: deepseek
