@@ -122,6 +122,7 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         only_source=args.source,
         twogis_api_key=settings.twogis_api_key,
+        timepad_token=settings.timepad_token,
         mode_override=args.mode,
     )
     print(

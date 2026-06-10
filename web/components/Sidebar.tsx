@@ -3,14 +3,15 @@
 import type { EventType } from "@/lib/types";
 import { EVENT_TYPE_LABELS } from "@/lib/types";
 import type { Filters, WhenFilter } from "@/lib/filters";
-import { ALL_TYPES } from "@/lib/filters";
 
 interface SidebarProps {
   filters: Filters;
   onChange: (next: Filters) => void;
+  /** Типы, доступные в текущем городе (узкая ниша для Перми, + широкие для Сочи). */
+  availableTypes: readonly EventType[];
 }
 
-export function Sidebar({ filters, onChange }: SidebarProps) {
+export function Sidebar({ filters, onChange, availableTypes }: SidebarProps) {
   const toggleType = (t: EventType) => {
     const next = new Set(filters.types);
     if (next.has(t)) next.delete(t);
@@ -29,7 +30,7 @@ export function Sidebar({ filters, onChange }: SidebarProps) {
   return (
     <aside className="bg-surface border border-border rounded-xl p-5 shadow-sm lg:sticky lg:top-[76px] self-start">
       <FilterBlock title="Тип">
-        {ALL_TYPES.map((t) => (
+        {availableTypes.map((t) => (
           <CheckboxRow
             key={t}
             label={EVENT_TYPE_LABELS[t]}

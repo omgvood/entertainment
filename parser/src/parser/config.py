@@ -33,7 +33,9 @@ class Settings:
     deepseek_api_key: Optional[str] = None
     """Нужен если llm_provider='deepseek' либо если планируется переключение через --provider."""
     twogis_api_key: Optional[str] = None
-    """Нужен если в seeds.yaml есть direct_api источники."""
+    """Нужен если в seeds.yaml есть direct_api источники с provider=twogis."""
+    timepad_token: Optional[str] = None
+    """Нужен если в seeds.yaml есть direct_api источники с provider=timepad."""
     llm_provider: LlmProvider = "gemini"
     gemini_model: Optional[str] = None
     """Override от env GEMINI_MODEL. Если None — DEFAULT_MODELS['gemini']."""
@@ -78,6 +80,7 @@ class Settings:
             groq_api_key=os.environ.get("GROQ_API_KEY"),
             deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY"),
             twogis_api_key=os.environ.get("TWOGIS_API_KEY"),
+            timepad_token=os.environ.get("TIMEPAD_TOKEN"),
             llm_provider=provider_raw,  # type: ignore[arg-type]
             gemini_model=os.environ.get("GEMINI_MODEL"),
             groq_model=os.environ.get("GROQ_MODEL"),

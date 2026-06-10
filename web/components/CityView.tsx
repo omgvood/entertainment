@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { City, EventItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
-import { applyFilters, DEFAULT_FILTERS, type Filters } from "@/lib/filters";
+import { applyFilters, availableTypes, DEFAULT_FILTERS, type Filters } from "@/lib/filters";
 import { Sidebar } from "./Sidebar";
 import { EventCard } from "./EventCard";
 
@@ -14,6 +14,7 @@ interface CityViewProps {
 }
 
 export function CityView({ events, cityTitle, city }: CityViewProps) {
+  const types = useMemo(() => availableTypes(events), [events]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
   const filtered = useMemo(
@@ -23,7 +24,7 @@ export function CityView({ events, cityTitle, city }: CityViewProps) {
 
   return (
     <div className="mx-auto max-w-[1440px] px-4 pt-6 pb-12 grid gap-6 lg:grid-cols-[240px_1fr] flex-1 w-full">
-      <Sidebar filters={filters} onChange={setFilters} />
+      <Sidebar filters={filters} onChange={setFilters} availableTypes={types} />
 
       <main>
         <div className="flex items-baseline justify-between gap-4 flex-wrap mb-5">

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 import httpx
@@ -13,11 +14,11 @@ from supabase import Client
 
 from .config import CityConfig, SourceConfig
 from .db import WriteStats, cleanup_old_events, upsert_events
-from .dedup import filter_new_urls
+from .dedup import filter_new_urls, get_source_hash, set_source_hash
 from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
-from .extraction import ExtractorError, LLMExtractor
-from .models import EventRow, EventType
-from .sources import TwoGisClient
+from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
+from .models import EventRow, EventType, ParsedEvent
+from .sources import KudaGoClient, TimepadClient, TwoGisClient
 from .validator import to_event_row
 
 
@@ -51,6 +52,7 @@ async def run_city(
     dry_run: bool = False,
     only_source: str | None = None,
     twogis_api_key: str | None = None,
+    timepad_token: str | None = None,
     mode_override: str | None = None,
 ) -> PipelineResult:
     """Полный прогон по одному городу. supabase=None при --dry-run.
@@ -59,6 +61,7 @@ async def run_city(
     прогона (per_url / batch_listing / direct_api) — для разовых сравнений провайдеров.
     """
     result = PipelineResult()
+    provider_keys = {"twogis": twogis_api_key, "timepad": timepad_token}
 
     async with httpx.AsyncClient(
         headers={"User-Agent": "EventsBot/1.0 (pet-project)"}
@@ -70,10 +73,12 @@ async def run_city(
                 continue
             mode = mode_override or source.extraction_mode
             if mode == "batch_listing":
-                rows, sub = await _run_batch_source(client, source, extractor, city.slug)
+                rows, sub = await _run_batch_source(
+                    client, source, extractor, supabase, city.slug, dry_run
+                )
             elif mode == "direct_api":
                 rows, sub = await _run_direct_api_source(
-                    client, source, city.slug, twogis_api_key
+                    client, source, city.slug, provider_keys
                 )
             else:
                 rows, sub = await _run_per_url_source(
@@ -172,78 +177,99 @@ async def _run_direct_api_source(
     client: httpx.AsyncClient,
     source: SourceConfig,
     city_slug: str,
-    twogis_api_key: str | None,
+    provider_keys: dict[str, str | None],
 ) -> tuple[list[EventRow], PipelineResult]:
-    """API-источник (2ГИС): JSON → ParsedEvent напрямую, без LLM."""
+    """API-источник: JSON провайдера → ParsedEvent напрямую, без LLM.
+
+    Каждый провайдер возвращает пары (ParsedEvent, source_url) — у 2ГИС это поисковая
+    карточка, у Timepad — реальная ссылка на событие.
+    """
     sub = PipelineResult()
 
-    if source.provider != "twogis":
-        log.error(
-            "direct_api.unknown_provider",
-            source=source.name,
-            provider=source.provider,
-        )
-        sub.failed = 1
-        return [], sub
-
-    if not twogis_api_key:
-        log.error("direct_api.missing_key", source=source.name, env="TWOGIS_API_KEY")
-        sub.failed = 1
-        return [], sub
-
-    if not source.api_query or not source.event_type:
-        log.error(
-            "direct_api.missing_config",
-            source=source.name,
-            need=["api_query", "event_type"],
-        )
-        sub.failed = 1
-        return [], sub
-
-    api = TwoGisClient(client, twogis_api_key)
     try:
-        parsed_events = await api.search(
-            source.api_query,
-            event_type=source.event_type,  # type: ignore[arg-type]
-        )
+        items = await _fetch_direct_api_items(client, source, city_slug, provider_keys)
+    except _DirectApiConfigError as exc:
+        log.error("direct_api.config", source=source.name, reason=str(exc))
+        sub.failed = 1
+        return [], sub
     except Exception as exc:  # noqa: BLE001
         log.error("direct_api.failed", source=source.name, error=str(exc))
         sub.failed = 1
         return [], sub
 
-    log.info(
-        "direct_api.ok",
-        source=source.name,
-        query=source.api_query,
-        count=len(parsed_events),
-    )
+    if items is None:
+        log.error(
+            "direct_api.unknown_provider", source=source.name, provider=source.provider
+        )
+        sub.failed = 1
+        return [], sub
+
+    log.info("direct_api.ok", source=source.name, provider=source.provider, count=len(items))
 
     rows: list[EventRow] = []
-    for parsed in parsed_events:
+    for parsed, source_url in items:
         try:
-            # source_url для 2ГИС-места — карточка в 2ГИС
-            # (точный URL можно собрать из item.id, но пока используем search URL)
-            source_url = f"https://2gis.ru/{city_slug}/search/{source.api_query}"
-            row = to_event_row(parsed, city_slug, source_url, source.name)
-            rows.append(row)
+            rows.append(to_event_row(parsed, city_slug, source_url, source.name))
             sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
             sub.failed += 1
             log.warning("direct_api.row_invalid", title=parsed.title, error=str(exc))
 
-    sub.discovered = len(parsed_events)
+    sub.discovered = len(items)
     sub.new = sub.extracted
-
     return rows, sub
+
+
+class _DirectApiConfigError(RuntimeError):
+    """Не хватает ключа или обязательного параметра конфигурации источника."""
+
+
+async def _fetch_direct_api_items(
+    client: httpx.AsyncClient,
+    source: SourceConfig,
+    city_slug: str,
+    provider_keys: dict[str, str | None],
+) -> list[tuple[ParsedEvent, str]] | None:
+    """Диспетчер по provider. None → провайдер неизвестен.
+
+    twogis/timepad требуют event_type из конфига; kudago сам маппит категории.
+    """
+    if source.provider == "twogis":
+        key = provider_keys.get("twogis")
+        if not key:
+            raise _DirectApiConfigError("нет TWOGIS_API_KEY")
+        if not source.api_query or not source.event_type:
+            raise _DirectApiConfigError("нужны api_query и event_type")
+        parsed = await TwoGisClient(client, key).search(
+            source.api_query, event_type=source.event_type  # type: ignore[arg-type]
+        )
+        # У 2ГИС реальной ссылки на событие нет — используем поисковую карточку.
+        url = f"https://2gis.ru/{city_slug}/search/{source.api_query}"
+        return [(p, url) for p in parsed]
+
+    if source.provider == "timepad":
+        token = provider_keys.get("timepad")
+        if not token:
+            raise _DirectApiConfigError("нет TIMEPAD_TOKEN")
+        # Широкая афиша: тип определяется по категории события внутри клиента.
+        return await TimepadClient(client, token).search(city_slug)
+
+    if source.provider == "kudago":
+        # Ключ не нужен; тип события маппится из категорий KudaGo внутри клиента.
+        return await KudaGoClient(client).search(source.api_query or city_slug)
+
+    return None
 
 
 async def _run_batch_source(
     client: httpx.AsyncClient,
     source: SourceConfig,
     extractor: LLMExtractor,
+    supabase: Client | None,
     city_slug: str,
+    dry_run: bool,
 ) -> tuple[list[EventRow], PipelineResult]:
-    """Скачиваем listing URL целиком, один LLM-вызов на все события."""
+    """Скачиваем listing URL целиком. JSON-LD → (фолбэк) один LLM-вызов на все события."""
     sub = PipelineResult()
 
     # 1. Один fetch listing-страницы
@@ -254,24 +280,48 @@ async def _run_batch_source(
         log.error("batch.fetch.failed", source=source.name, error=str(exc))
         return [], sub
 
-    # 2. Один LLM-вызов
-    try:
-        parsed_events = await extractor.extract_many(resp.text, source.url)
-    except ExtractorError as exc:
-        log.warning("batch.extract.skipped", source=source.name, reason=str(exc))
-        sub.failed = 1
-        return [], sub
-    except Exception as exc:  # noqa: BLE001
-        log.error("batch.extract.failed", source=source.name, error=str(exc))
-        sub.failed = 1
-        return [], sub
+    # 2. Дедуп по хешу контента: если листинг не менялся — не зовём LLM/JSON-LD.
+    content_hash = hashlib.sha256(resp.text.encode("utf-8")).hexdigest()
+    if not dry_run and supabase is not None:
+        if get_source_hash(supabase, city_slug, source.name) == content_hash:
+            log.info("batch.skip.unchanged", source=source.name, url=source.url)
+            return [], sub
 
-    log.info(
-        "batch.extract.ok",
-        source=source.name,
-        url=source.url,
-        count=len(parsed_events),
-    )
+    # 3. JSON-LD (бесплатно) перед LLM. Нужен default_type из конфига источника.
+    parsed_events: list[ParsedEvent] = []
+    if source.event_type:
+        try:
+            parsed_events = extract_jsonld_events(resp.text, source.event_type)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("jsonld.failed", source=source.name, error=str(exc))
+        if parsed_events:
+            log.info(
+                "jsonld.ok", source=source.name, url=source.url, count=len(parsed_events)
+            )
+
+    # 4. Фолбэк на LLM, если JSON-LD ничего не дал.
+    if not parsed_events:
+        try:
+            parsed_events = await extractor.extract_many(resp.text, source.url)
+        except ExtractorError as exc:
+            log.warning("batch.extract.skipped", source=source.name, reason=str(exc))
+            sub.failed = 1
+            return [], sub
+        except Exception as exc:  # noqa: BLE001
+            log.error("batch.extract.failed", source=source.name, error=str(exc))
+            sub.failed = 1
+            return [], sub
+
+        log.info(
+            "batch.extract.ok",
+            source=source.name,
+            url=source.url,
+            count=len(parsed_events),
+        )
+
+    # Извлечение прошло — фиксируем хеш, чтобы следующий неизменный прогон пропустить.
+    if not dry_run and supabase is not None:
+        set_source_hash(supabase, city_slug, source.name, content_hash)
 
     # 3. Маппинг в EventRow. В batch-режиме source_url у всех — это listing URL
     # (точную ссылку на конкретное событие LLM не знает, можно добавить отдельным полем позже).
