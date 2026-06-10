@@ -24,7 +24,7 @@ import structlog
 from .config import LlmProvider, Settings, load_seeds
 from .db import make_client
 from .discovery import ListingDiscovery, SitemapDiscovery
-from .extraction import GeminiExtractor, GroqExtractor, LLMExtractor
+from .extraction import DeepSeekExtractor, GeminiExtractor, GroqExtractor, LLMExtractor
 from .pipeline import run_city
 
 
@@ -38,6 +38,10 @@ def _make_extractor(settings: Settings, provider: LlmProvider) -> LLMExtractor:
         if not settings.groq_api_key:
             raise RuntimeError("GROQ_API_KEY не задан — нужен для provider=groq")
         return GroqExtractor(api_key=settings.groq_api_key, model=model)
+    if provider == "deepseek":
+        if not settings.deepseek_api_key:
+            raise RuntimeError("DEEPSEEK_API_KEY не задан — нужен для provider=deepseek")
+        return DeepSeekExtractor(api_key=settings.deepseek_api_key, model=model)
     raise ValueError(f"Неизвестный провайдер: {provider!r}")
 
 
@@ -118,6 +122,7 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         only_source=args.source,
         twogis_api_key=settings.twogis_api_key,
+        timepad_token=settings.timepad_token,
         mode_override=args.mode,
     )
     print(
@@ -146,7 +151,7 @@ def main() -> int:
     )
     p_run.add_argument(
         "--provider",
-        choices=["gemini", "groq"],
+        choices=["gemini", "groq", "deepseek"],
         default=None,
         help="Override LLM_PROVIDER из .env (для разовых сравнений)",
     )

@@ -10,7 +10,13 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-EventType = Literal["quiz", "standup", "bowling", "billiards", "karting"]
+# Узкая ниша MVP-1 (Пермь + Сочи) + широкая афиша MVP-2 (Timepad: тип по категории события).
+EventType = Literal[
+    "quiz", "standup", "bowling", "billiards", "karting",
+    "concert", "theater", "exhibition", "festival", "quest", "party",
+    "cinema", "sport", "education", "business", "art", "kids", "food", "trip", "hobby", "science",
+    "other",
+]
 
 
 class ParsedEvent(BaseModel):

@@ -37,6 +37,21 @@ cities:
         api_query: "картинг Сочи"
         event_type: karting
 
+      # Timepad — широкая афиша: тип события определяется по его категории Timepad
+      - name: timepad
+        extraction_mode: direct_api
+        provider: timepad
+
+      # KudaGo — пилот «широкой афиши» для Сочи. ОТКЛЮЧЁН: данные KudaGo по Сочи
+      # устарели (проверено 2026-06-10) — с фильтром actual_since остаётся ~36 записей,
+      # все из 2016 г. или без даты (is_startless). Источник возвращает 0 актуальных.
+      # Клиент (sources/kudago.py) и диспетчер готовы — раскомментировать, если KudaGo
+      # снова начнёт отдавать свежие события по Сочи.
+      # - name: kudago
+      #   extraction_mode: direct_api
+      #   provider: kudago
+      #   api_query: "sochi"
+
   perm:
     sources:
       # QuizPlease: на странице расписания видны все игры → batch_listing
@@ -64,3 +79,15 @@ cities:
         provider: twogis
         api_query: "картинг Пермь"
         event_type: karting
+
+      # Timepad — широкая афиша: тип события определяется по его категории Timepad
+      - name: timepad
+        extraction_mode: direct_api
+        provider: timepad
+
+      # DeepSeek тестовый источник (раскомментировать для локального тестирования)
+      # - name: quizplease-deepseek-test
+      #   kind: listing
+      #   url: https://perm.quizplease.ru/schedule
+      #   extraction_mode: batch_listing
+      #   provider: deepseek

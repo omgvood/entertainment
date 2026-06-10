@@ -23,7 +23,32 @@ export const ALL_TYPES: readonly EventType[] = [
   "bowling",
   "billiards",
   "karting",
+  "concert",
+  "theater",
+  "exhibition",
+  "festival",
+  "quest",
+  "party",
+  "cinema",
+  "sport",
+  "education",
+  "business",
+  "art",
+  "kids",
+  "food",
+  "trip",
+  "hobby",
+  "science",
+  "other",
 ];
+
+/**
+ * Типы, реально присутствующие в событиях города (в порядке ALL_TYPES).
+ * Пермь (узкая ниша) покажет только свои типы, Сочи — плюс широкие из KudaGo.
+ */
+export function availableTypes(events: EventItem[]): EventType[] {
+  return ALL_TYPES.filter((t) => events.some((e) => e.type === t));
+}
 
 export const DEFAULT_FILTERS: Filters = {
   types: new Set(ALL_TYPES),

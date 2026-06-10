@@ -13,11 +13,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-LlmProvider = Literal["gemini", "groq"]
+LlmProvider = Literal["gemini", "groq", "deepseek"]
 
 DEFAULT_MODELS: dict[str, str] = {
     "gemini": "gemini-2.5-flash-lite",
     "groq": "llama-3.3-70b-versatile",
+    "deepseek": "deepseek/deepseek-v4-flash",
 }
 
 
@@ -29,17 +30,27 @@ class Settings:
     """Нужен если llm_provider='gemini' либо если планируется переключение через --provider."""
     groq_api_key: Optional[str] = None
     """Нужен если llm_provider='groq'."""
+    deepseek_api_key: Optional[str] = None
+    """Нужен если llm_provider='deepseek' либо если планируется переключение через --provider."""
     twogis_api_key: Optional[str] = None
-    """Нужен если в seeds.yaml есть direct_api источники."""
+    """Нужен если в seeds.yaml есть direct_api источники с provider=twogis."""
+    timepad_token: Optional[str] = None
+    """Нужен если в seeds.yaml есть direct_api источники с provider=timepad."""
     llm_provider: LlmProvider = "gemini"
     gemini_model: Optional[str] = None
     """Override от env GEMINI_MODEL. Если None — DEFAULT_MODELS['gemini']."""
     groq_model: Optional[str] = None
     """Override от env GROQ_MODEL. Если None — DEFAULT_MODELS['groq']."""
+    deepseek_model: Optional[str] = None
+    """Override от env DEEPSEEK_MODEL. Если None — DEFAULT_MODELS['deepseek']."""
     log_level: str = "INFO"
 
     def model_for(self, provider: LlmProvider) -> str:
-        override = {"gemini": self.gemini_model, "groq": self.groq_model}[provider]
+        override = {
+            "gemini": self.gemini_model,
+            "groq": self.groq_model,
+            "deepseek": self.deepseek_model,
+        }[provider]
         return override or DEFAULT_MODELS[provider]
 
     @classmethod
@@ -57,9 +68,9 @@ class Settings:
             )
 
         provider_raw = os.environ.get("LLM_PROVIDER", "gemini").lower()
-        if provider_raw not in ("gemini", "groq"):
+        if provider_raw not in ("gemini", "groq", "deepseek"):
             raise RuntimeError(
-                f"LLM_PROVIDER={provider_raw!r} не поддерживается. Допустимо: gemini, groq."
+                f"LLM_PROVIDER={provider_raw!r} не поддерживается. Допустимо: gemini, groq, deepseek."
             )
 
         return cls(
@@ -67,10 +78,13 @@ class Settings:
             supabase_service_key=supabase_service_key,  # type: ignore[arg-type]
             gemini_api_key=os.environ.get("GEMINI_API_KEY"),
             groq_api_key=os.environ.get("GROQ_API_KEY"),
+            deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY"),
             twogis_api_key=os.environ.get("TWOGIS_API_KEY"),
+            timepad_token=os.environ.get("TIMEPAD_TOKEN"),
             llm_provider=provider_raw,  # type: ignore[arg-type]
             gemini_model=os.environ.get("GEMINI_MODEL"),
             groq_model=os.environ.get("GROQ_MODEL"),
+            deepseek_model=os.environ.get("DEEPSEEK_MODEL"),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
         )
 
