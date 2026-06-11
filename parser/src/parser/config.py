@@ -99,6 +99,8 @@ class SourceConfig:
 
     name: str
     extraction_mode: ExtractionMode = "per_url"
+    priority: int = 0
+    """Приоритет источника при кросс-источниковой дедупликации (выше — побеждает). Шаг 6."""
 
     # Для per_url и batch_listing:
     kind: Optional[DiscoveryKind] = None
@@ -141,6 +143,7 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
             SourceConfig(
                 name=s["name"],
                 extraction_mode=s.get("extraction_mode", "per_url"),
+                priority=s.get("priority", 0),
                 kind=s.get("kind"),
                 url=s.get("url"),
                 url_pattern=s.get("url_pattern"),

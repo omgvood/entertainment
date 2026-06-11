@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -13,8 +14,17 @@ import structlog
 from supabase import Client
 
 from .config import CityConfig, SourceConfig
-from .db import WriteStats, cleanup_old_events, upsert_events
-from .dedup import filter_new_urls, get_source_hash, set_source_hash
+from .db import (
+    WriteStats,
+    cleanup_old_events,
+    cleanup_old_raw_documents,
+    get_raw_document_hash,
+    record_coverage,
+    record_source_health,
+    save_raw_document,
+    upsert_events,
+)
+from .dedup import filter_new_urls
 from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
 from .models import EventRow, EventType, ParsedEvent
@@ -32,6 +42,7 @@ class PipelineResult:
     extracted: int = 0
     failed: int = 0
     written: int = 0
+    duplicate_candidates: int = 0
 
 
 def _make_discovery(client: httpx.AsyncClient, source: SourceConfig):
@@ -72,6 +83,7 @@ async def run_city(
             if only_source and source.name != only_source:
                 continue
             mode = mode_override or source.extraction_mode
+            started = time.perf_counter()
             if mode == "batch_listing":
                 rows, sub = await _run_batch_source(
                     client, source, extractor, supabase, city.slug, dry_run
@@ -84,11 +96,22 @@ async def run_city(
                 rows, sub = await _run_per_url_source(
                     client, source, extractor, supabase, city.slug, dry_run
                 )
+            duration = time.perf_counter() - started
             all_rows.extend(rows)
             result.discovered += sub.discovered
             result.new += sub.new
             result.extracted += sub.extracted
             result.failed += sub.failed
+
+            if not dry_run and supabase is not None:
+                record_source_health(
+                    supabase,
+                    source.name,
+                    city.slug,
+                    events_found=sub.extracted,
+                    errors=sub.failed,
+                    duration_sec=duration,
+                )
 
         # 4. Дедуп по id — если два источника (или два item'а 2ГИС) дали одинаковый
         # slug, Postgres не сможет upsert-нуть их в одном batch. Оставляем последний.
@@ -108,6 +131,19 @@ async def run_city(
         if collisions:
             log.info("dedup.summary", collisions=collisions, final_count=len(all_rows))
 
+        # 4b. Кросс-источниковые кандидаты на дубль: одинаковый fingerprint (title+date+venue),
+        # но разный slug/источник. НЕ схлопываем (constraint вводим позже) — только считаем.
+        fp_groups: dict[str, int] = {}
+        for r in all_rows:
+            if r.fingerprint:
+                fp_groups[r.fingerprint] = fp_groups.get(r.fingerprint, 0) + 1
+        result.duplicate_candidates = sum(n - 1 for n in fp_groups.values() if n > 1)
+        if result.duplicate_candidates:
+            log.info(
+                "dedup.fingerprint_candidates",
+                duplicate_candidates=result.duplicate_candidates,
+            )
+
         # 5. Write
         if dry_run or supabase is None:
             log.info("write.skipped", reason="dry-run", would_write=len(all_rows))
@@ -115,6 +151,8 @@ async def run_city(
             stats: WriteStats = upsert_events(supabase, all_rows)
             result.written = stats.inserted
             cleanup_old_events(supabase, city.slug)
+            cleanup_old_raw_documents(supabase)
+            record_coverage(supabase, city.slug)
 
     return result
 
@@ -162,6 +200,8 @@ async def _run_per_url_source(
             row = to_event_row(parsed, city_slug, d.url, d.source)
             rows.append(row)
             sub.extracted += 1
+            if not dry_run and supabase is not None:
+                save_raw_document(supabase, d.source, d.url, resp.text, "html")
             log.info("extract.ok", url=d.url, title=parsed.title)
         except ExtractorError as exc:
             sub.failed += 1
@@ -281,9 +321,10 @@ async def _run_batch_source(
         return [], sub
 
     # 2. Дедуп по хешу контента: если листинг не менялся — не зовём LLM/JSON-LD.
+    # Хеш хранится в raw_documents (по url) — там же лежит само сырьё для перепарса.
     content_hash = hashlib.sha256(resp.text.encode("utf-8")).hexdigest()
     if not dry_run and supabase is not None:
-        if get_source_hash(supabase, city_slug, source.name) == content_hash:
+        if get_raw_document_hash(supabase, source.url) == content_hash:
             log.info("batch.skip.unchanged", source=source.name, url=source.url)
             return [], sub
 
@@ -319,9 +360,12 @@ async def _run_batch_source(
             count=len(parsed_events),
         )
 
-    # Извлечение прошло — фиксируем хеш, чтобы следующий неизменный прогон пропустить.
+    # Извлечение прошло — архивируем сырьё + фиксируем хеш (raw_documents): следующий
+    # неизменный прогон пропустим, а сырьё можно перепарсить новым промптом/моделью.
     if not dry_run and supabase is not None:
-        set_source_hash(supabase, city_slug, source.name, content_hash)
+        save_raw_document(
+            supabase, source.name, source.url, resp.text, "html", content_hash
+        )
 
     # 3. Маппинг в EventRow. В batch-режиме source_url у всех — это listing URL
     # (точную ссылку на конкретное событие LLM не знает, можно добавить отдельным полем позже).

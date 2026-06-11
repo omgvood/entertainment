@@ -73,6 +73,8 @@ export interface EventItem {
   imageUrl?: string;
   description?: string;
   organizer?: string;
+  /** Теги из закрытого набора (для подборок/рекомендаций). */
+  tags: string[];
   sourceUrl: string;
   /** Откуда событие пришло: `quizplease` / `manual` / `llm-extract` / ... */
   source: string;

@@ -5,23 +5,44 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 
 from .models import EventRow, ParsedEvent
+from .taxonomy import default_tags_for_type
 
 
 def to_event_row(parsed: ParsedEvent, city: str, source_url: str, source: str) -> EventRow:
     slug = _make_slug(parsed.title, parsed.date)
+    data = parsed.model_dump()
+    # direct_api источники (2ГИС/Timepad) не проставляют теги — подставляем авто-теги по типу.
+    if not data["tags"]:
+        data["tags"] = default_tags_for_type(parsed.type)
     return EventRow(
-        **parsed.model_dump(),
+        **data,
         id=f"{city}-{slug}",
         city=city,
         slug=slug,
         source_url=source_url,
         source=source,
         parsed_at=EventRow.make_parsed_at_now(),
+        fingerprint=_fingerprint(parsed.title, parsed.date, parsed.venue_name),
     )
+
+
+def _normalize(s: str) -> str:
+    """Нормализация для fingerprint: нижний регистр, ё→е, без пунктуации, схлопнутые пробелы."""
+    s = s.lower().replace("ё", "е")
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _fingerprint(title: str, date: str, venue_name: str) -> str:
+    """Хеш для кросс-источниковой дедупликации. Без UNIQUE — сначала собираем статистику."""
+    key = f"{_normalize(title)}|{date}|{_normalize(venue_name)}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 # Простой словарь транслита (без внешних зависимостей).

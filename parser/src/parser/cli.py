@@ -96,6 +96,27 @@ async def _cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _cmd_discover_sources(args: argparse.Namespace) -> int:
+    """Поиск новых источников → candidate_sources (Discovery). Раз в неделю."""
+    from .sources.candidate_sources import discover_sources
+
+    supabase = None
+    if not args.dry_run:
+        settings = Settings.from_env()
+        _setup_logging(settings.log_level)
+        supabase = make_client(settings.supabase_url, settings.supabase_service_key)
+
+    candidates = await discover_sources(args.city, supabase, dry_run=args.dry_run)
+
+    print(f"\nКандидаты для {args.city} (по убыванию score):")
+    for c in candidates[:30]:
+        flag = " [JSON-LD Event]" if c.has_jsonld_event else ""
+        print(f"  {c.score:>3}  {c.domain}{flag}  (запросов: {len(c.queries)})")
+    print(f"\nВсего кандидатов: {len(candidates)}"
+          f"{' (dry-run, не сохранено)' if args.dry_run else ''}")
+    return 0
+
+
 async def _cmd_run(args: argparse.Namespace) -> int:
     """Полный пайплайн."""
     settings = Settings.from_env()
@@ -128,7 +149,8 @@ async def _cmd_run(args: argparse.Namespace) -> int:
     print(
         f"\nГотово: discovered={result.discovered}, "
         f"new={result.new}, extracted={result.extracted}, "
-        f"failed={result.failed}, written={result.written}"
+        f"failed={result.failed}, written={result.written}, "
+        f"duplicate_candidates={result.duplicate_candidates}"
     )
     return 0 if result.failed < result.extracted else 1
 
@@ -140,6 +162,14 @@ def main() -> int:
     p_disc = sub.add_parser("discover", help="Только дискавери, без LLM и записи")
     p_disc.add_argument("--city", required=True)
     p_disc.add_argument("--source", help="Имя одного источника")
+
+    p_ds = sub.add_parser("discover-sources", help="Поиск новых источников (Discovery)")
+    p_ds.add_argument("--city", required=True)
+    p_ds.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Не писать в candidate_sources, только вывести кандидатов",
+    )
 
     p_run = sub.add_parser("run", help="Полный пайплайн")
     p_run.add_argument("--city", required=True)
@@ -166,6 +196,8 @@ def main() -> int:
 
     if args.cmd == "discover":
         return asyncio.run(_cmd_discover(args))
+    if args.cmd == "discover-sources":
+        return asyncio.run(_cmd_discover_sources(args))
     if args.cmd == "run":
         return asyncio.run(_cmd_run(args))
     return 1
