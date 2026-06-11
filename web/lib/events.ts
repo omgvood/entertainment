@@ -30,6 +30,7 @@ interface EventRow {
   image_url: string | null;
   description: string | null;
   organizer: string | null;
+  tags: string[] | null;
   source_url: string;
   source: string;
   parsed_at: string;
@@ -58,6 +59,7 @@ function rowToEvent(r: EventRow): EventItem {
     imageUrl: r.image_url ?? undefined,
     description: r.description ?? undefined,
     organizer: r.organizer ?? undefined,
+    tags: r.tags ?? [],
     sourceUrl: r.source_url,
     source: r.source,
     parsedAt: r.parsed_at,

@@ -1,6 +1,6 @@
 # Афиша — агрегатор событий досуга
 
-Сайт-агрегатор развлечений для Перми и Сочи: квизы, стендапы, боулинг, бильярд, картинг.
+Сайт-агрегатор афиши Перми и Сочи: концерты, спектакли, выставки, кино, экскурсии, квизы, стендапы, боулинг, бильярд, картинг. Старт — узкая ниша (квизы/места), сейчас — широкая афиша через Timepad.
 
 **Стек:** Python 3.11+ (парсер) · PostgreSQL / Supabase (хранилище) · Next.js 16 SSG (фронтенд) · GitHub Actions (CI/CD) · Vercel (хостинг)
 
@@ -13,8 +13,10 @@ GitHub Actions (cron, 00:00 МСК)
     │
     ▼
 Python-парсер (parser/)
-    ├── Discovery: краулер HTML / sitemap / 2ГИС API
-    ├── LLM Extraction: Gemini / Groq / DeepSeek → ParsedEvent
+    ├── direct_api: 2ГИС / Timepad → ParsedEvent (без LLM)
+    ├── Discovery: краулер HTML / sitemap (для listing-источников)
+    ├── Extraction: JSON-LD (Schema.org) → фолбэк LLM (Gemini / Groq / DeepSeek)
+    ├── Dedup: новые URL + хеш листинга (raw_documents) — экономия LLM
     ├── Validation: slug, типы, даты
     └── DB Write: upsert в Supabase Postgres
     │
@@ -30,6 +32,79 @@ Vercel CDN ← пользователь
 
 Сайт полностью статический — нет серверного рендеринга в рантайме. После каждого прогона парсера GitHub Actions отправляет хук в Vercel, сайт пересобирается с актуальными данными.
 
+Проект логически делится на **4 подсистемы**:
+
+| Подсистема | Что входит | Назначение |
+|-----------|-----------|-----------|
+| **Discovery** | `candidate_sources` | Поиск новых источников → ручная модерация → `seeds.yaml` |
+| **Ingestion** | crawlers + API-клиенты + `raw_documents` | Получение и хранение сырого контента |
+| **Extraction** | JSON-LD / LLM / теги | Превращение сырья в `ParsedEvent` |
+| **Analytics** | `source_health` + `coverage_stats` | Мониторинг здоровья источников и полноты покрытия |
+
+---
+
+## Покрытие по категориям
+
+Успех проекта измеряется **не числом источников, а полнотой покрытия спроса** по категориям.
+Пользователю всё равно, откуда данные — важно, найдёт ли он, «куда сходить».
+
+Текущее покрытие (Пермь):
+
+| Категория | Источники | Статус |
+|-----------|-----------|--------|
+| Концерты | Timepad | ✅ |
+| Театр | Timepad | ✅ |
+| Выставки | Timepad | ✅ |
+| Квизы | QuizPlease + Timepad | ✅ |
+| Стендап | Timepad (partial) | ⚠️ нет своей категории в Timepad |
+| Квесты | 2ГИС | ✅ |
+| Боулинг | 2ГИС | ✅ |
+| Детям | Timepad (partial) | ⚠️ |
+| Экскурсии | — | ❌ |
+| Мастер-классы | — | ❌ |
+
+Категории со статусом ❌/⚠️ — это сигнал, какие источники искать через **Discovery** (`candidate_sources`).
+Полнота отслеживается автоматически в таблице `coverage_stats` (исторические снимки по дням).
+
+---
+
+## Метрики успеха
+
+**MVP-1 (Пермь)** — минимум по категориям:
+
+| Категория | Минимум |
+|-----------|---------|
+| Концерты | 100+ |
+| Выставки | 50+ |
+| Квизы | 20+ |
+| Стендап | 10+ |
+| Постоянные места | 100+ |
+
+Общие цели MVP-1: 500+ активных событий · 15+ источников · обновление ≤ 24ч ·
+дублей между источниками < 5% · успешность парсинга ≥ 95% ·
+необработанных `candidate_sources` (status='new') < 50.
+
+**MVP-2 (Пермь + Сочи):** 1500+ карточек суммарно · 30+ источников.
+
+---
+
+## Что реализовано
+
+Помимо базового пайплайна (discovery → extract → write), добавлены подсистемы для масштабирования
+и контроля качества данных:
+
+| Возможность | Что даёт | Где |
+|-------------|----------|-----|
+| **Теги** (`tags` + `tags_version`) | Основа подборок/рекомендаций. Закрытый набор, версионируемый. LLM выбирает из набора, direct_api получает авто-теги по типу | `taxonomy.py`, `models.py`, промпты экстракторов |
+| **Discovery источников** | Поиск новых сайтов → скоринг → `candidate_sources` → ручная модерация → `seeds.yaml` | `sources/candidate_sources.py`, команда `discover-sources` |
+| **Raw Documents** | Хранение сырья (HTML/JSON) для перепарса без повторного краулинга; здесь же хеш для дедупа | `db.py` (`save_raw_document`), таблица `raw_documents` |
+| **Source Health** | Лог + агрегат по источникам: `events_found`, `errors`, `duration_sec`, `success_rate` | `db.py` (`record_source_health`), таблицы `source_health*` |
+| **Coverage Stats** | Ежедневный снимок покрытия по категориям — видно тренды и выпадение категорий | `db.py` (`record_coverage`), таблица `coverage_stats` |
+| **Fingerprint** | Кросс-источниковая дедупликация по `title+date+venue` (без UNIQUE — пока статистика) | `validator.py` (`_fingerprint`), поле `events.fingerprint` |
+| **Source priority** | Приоритет источника для разрешения дублей | `config.py` (`SourceConfig.priority`) |
+
+Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
+
 ---
 
 ## Структура репозитория
@@ -40,13 +115,14 @@ entertainment/
 │   ├── config/
 │   │   └── seeds.yaml              — источники по городам (URL, режим, тип)
 │   ├── src/parser/
-│   │   ├── cli.py                  — точка входа CLI
-│   │   ├── config.py               — Settings + загрузка seeds
-│   │   ├── models.py               — ParsedEvent, EventRow (Pydantic)
-│   │   ├── pipeline.py             — оркестратор пайплайна
-│   │   ├── db.py                   — upsert + cleanup в Supabase
-│   │   ├── dedup.py                — фильтрация известных URL
-│   │   ├── validator.py            — конвертация в EventRow + slug
+│   │   ├── cli.py                  — точка входа CLI (discover / discover-sources / run)
+│   │   ├── config.py               — Settings + SourceConfig (с priority) + загрузка seeds
+│   │   ├── models.py               — ParsedEvent, EventRow (Pydantic) + tags/fingerprint
+│   │   ├── taxonomy.py             — закрытый набор тегов + TAGS_VERSION + авто-теги
+│   │   ├── pipeline.py             — оркестратор пайплайна + health/coverage/dedup
+│   │   ├── db.py                   — upsert + cleanup + raw_documents/health/coverage
+│   │   ├── dedup.py                — фильтрация известных URL (per_url)
+│   │   ├── validator.py            — конвертация в EventRow + slug + fingerprint
 │   │   ├── discovery/
 │   │   │   ├── base.py             — абстрактный класс DiscoveryStrategy
 │   │   │   ├── listing.py          — краулер HTML-листингов
@@ -60,10 +136,15 @@ entertainment/
 │   │   └── sources/
 │   │       ├── twogis.py           — 2ГИС Catalog API (без LLM)
 │   │       ├── timepad.py          — Timepad API, широкая афиша; тип по категории (без LLM)
-│   │       └── kudago.py           — KudaGo API, широкая афиша (без LLM; Сочи-пилот, отключён)
+│   │       ├── kudago.py           — KudaGo API, широкая афиша (без LLM; Сочи-пилот, отключён)
+│   │       └── candidate_sources.py — Discovery новых источников (поиск → скоринг → БД)
 │   ├── tests/                      — pytest тесты
 │   ├── pyproject.toml              — зависимости и настройки пакета
 │   └── README.md                   — документация парсера
+│
+├── supabase/
+│   ├── migrations/                — SQL-миграции схемы (tags, fingerprint, raw_documents, …)
+│   └── seeds/                      — тестовые данные (sochi_events.sql)
 │
 ├── web/                            — Next.js 16 фронтенд
 │   ├── app/
@@ -89,7 +170,8 @@ entertainment/
 │   └── README.md                   — документация фронтенда
 │
 ├── .github/workflows/
-│   └── parse.yml                   — CI/CD: ежедневный запуск парсера
+│   ├── parse.yml                   — CI/CD: ежедневный запуск парсера
+│   └── discover_sources.yml        — еженедельный поиск новых источников
 │
 ├── input/                          — образцы JSON-данных для тестирования
 ├── prototype/                      — ранний UI-прототип (HTML/CSS)
@@ -109,6 +191,7 @@ entertainment/
 | Команда | Что делает |
 |---------|-----------|
 | `discover` | Только discovery без LLM и записи в БД. Используется для отладки краулеров |
+| `discover-sources` | Discovery новых источников: поиск → скоринг → `candidate_sources` (раз в неделю) |
 | `run` | Полный пайплайн: discovery → dedup → LLM-извлечение → валидация → запись в БД |
 
 **Флаги:**
@@ -139,8 +222,9 @@ entertainment/
 **`SourceConfig`** — конфигурация одного источника из `seeds.yaml`:
 - `name` — уникальное имя источника
 - `extraction_mode` — `per_url` / `batch_listing` / `direct_api`
+- `priority` — приоритет источника при кросс-источниковой дедупликации (выше — побеждает), дефолт `0`
 - Для `per_url`/`batch_listing`: `kind` (listing/sitemap), `url`, `url_pattern` (regex)
-- Для `direct_api`: `provider` (twogis), `api_query`, `event_type`
+- Для `direct_api`: `provider` (`twogis` / `timepad` / `kudago`). `twogis` требует `api_query` + `event_type`; `timepad`/`kudago` тип определяют сами по категории (доп. полей не нужно)
 
 **`CityConfig`** — список источников одного города.
 
@@ -170,9 +254,9 @@ cities:
 ```
 
 **Режимы извлечения:**
-- `batch_listing` — скачивает страницу целиком. Сначала пробует Schema.org JSON-LD (бесплатно, без LLM); если не нашёл — один LLM-вызов извлекает все события. Пропускается целиком, если HTML не менялся (хеш в `parse_state`)
+- `batch_listing` — скачивает страницу целиком. Сначала пробует Schema.org JSON-LD (бесплатно, без LLM); если не нашёл — один LLM-вызов извлекает все события. Пропускается целиком, если HTML не менялся (хеш в `raw_documents`)
 - `per_url` — дискавери находит N URL, затем N отдельных LLM-вызовов для каждого
-- `direct_api` — вызов внешнего API (2ГИС), маппинг JSON → `ParsedEvent` без LLM
+- `direct_api` — вызов внешнего API (2ГИС / Timepad / KudaGo), маппинг JSON → `ParsedEvent` без LLM
 
 ---
 
@@ -196,8 +280,9 @@ cities:
 | `description` | str? | Описание ≤ 500 символов |
 | `organizer` | str? | Организатор |
 | `district` | str? | Район города |
+| `tags` | list[str] | Теги из закрытого набора `taxonomy.ALLOWED_TAGS` (валидатор отбрасывает чужие) |
 
-Валидаторы: формат даты, формат времени, `price_max >= price_min`.
+Валидаторы: формат даты, формат времени, `price_max >= price_min`, фильтрация тегов.
 
 **`EventRow`** (ParsedEvent + служебные поля) — строка в таблице БД:
 - `id` — `{city}-{slug}`
@@ -206,6 +291,26 @@ cities:
 - `source_url` — ссылка на источник
 - `source` — имя источника из seeds
 - `parsed_at` — UTC timestamp извлечения
+- `tags_version` — версия таксономии тегов (дефолт `TAGS_VERSION`)
+- `fingerprint` — хеш `title+date+venue` для кросс-источниковой дедупликации
+
+---
+
+### `taxonomy.py` — теги для подборок
+
+Единый источник правды для тегов. Теги — основа будущих подборок («куда сходить с девушкой»,
+«бесплатные мероприятия», «интеллектуальный досуг») и рекомендаций.
+
+- **`TAGS_VERSION`** — версия набора. При изменении тегов поднимается; события со старой версией
+  можно перепарсить (особенно вместе с `raw_documents`).
+- **`ALLOWED_TAGS`** — закрытый набор: `для компании`, `для пары`, `для детей`, `интеллектуальное`,
+  `активное`, `творческое`, `вечером`, `днём`, `в помещении`, `на улице`, `бесплатно`.
+- **`filter_tags(tags)`** — оставляет только разрешённые теги (вызывается валидатором `ParsedEvent`).
+- **`default_tags_for_type(type)`** — авто-теги по типу события для `direct_api`-источников
+  (где LLM не вызывается): например `quiz → [интеллектуальное, для компании]`.
+
+LLM-экстракторы получают список разрешённых тегов в системном промпте и выбирают из него;
+`direct_api` (2ГИС/Timepad) получают авто-теги в `validator.to_event_row()`.
 
 ---
 
@@ -214,26 +319,29 @@ cities:
 **`run_city(city_config, extractor, supabase_client, dry_run, source_filter)`**
 
 Главная функция, запускается из CLI для каждого города:
-1. Перебирает источники из `CityConfig`
+1. Перебирает источники из `CityConfig`, замеряя длительность каждого
 2. Для каждого вызывает нужный runner (`_run_per_url_source`, `_run_batch_source`, `_run_direct_api_source`)
-3. Дедупликация по source_url
-4. Upsert в БД
-5. Очистка старых событий
-6. Возвращает `PipelineResult` со счётчиками (discovered / new / extracted / failed / written)
+3. Пишет здоровье источника в `source_health` (`record_source_health`)
+4. Дедупликация по `id` + подсчёт `duplicate_candidates` по `fingerprint` (без схлопывания)
+5. Upsert в БД
+6. Очистка: `cleanup_old_events` + `cleanup_old_raw_documents` (TTL) + снимок `record_coverage`
+7. Возвращает `PipelineResult` (discovered / new / extracted / failed / written / duplicate_candidates)
 
 **`_run_per_url_source(source, extractor, client, dry_run)`**
 - Discovery (listing или sitemap) → список URL
 - `filter_new_urls()` — убирает уже известные
 - Для каждого нового URL: скачать HTML → `extractor.extract()` → `to_event_row()`
+- Архивирует сырьё в `raw_documents` (для перепарса)
 
-**`_run_batch_source(source, extractor, client, dry_run)`**
-- Скачать страницу-листинг целиком
-- Один вызов `extractor.extract_many()` → список `ParsedEvent`
+**`_run_batch_source(source, extractor, supabase, city, dry_run)`**
+- Скачать страницу-листинг целиком; посчитать хеш → если не менялся, пропустить (хеш в `raw_documents`)
+- Сначала JSON-LD (`extract_jsonld_events`, без LLM); если пусто — один вызов `extractor.extract_many()`
+- После успешного извлечения архивирует сырьё + фиксирует хеш в `raw_documents`
 - Batch-вариант эффективнее для страниц с полным расписанием (QuizPlease)
 
-**`_run_direct_api_source(source, client, dry_run)`**
-- `TwoGisClient.search()` → готовые `ParsedEvent` без LLM
-- Маппинг и запись в БД
+**`_run_direct_api_source(source, client, provider_keys)`**
+- Диспетчер по `source.provider`: `TwoGisClient` / `TimepadClient` / `KudaGoClient`
+- Каждый возвращает `(ParsedEvent, source_url)` без LLM → маппинг и запись в БД
 
 ---
 
@@ -251,6 +359,16 @@ cities:
 - Сохраняет: постоянные места (`always`) и события ближайших 7 дней (буфер на случай отмены парсинга)
 - Вызывается автоматически после каждого прогона
 
+**Ingestion (`raw_documents`):**
+- `save_raw_document(client, source, url, content, content_type, content_hash)` — upsert сырья по `url`
+- `get_raw_document_hash(client, url)` — хеш последнего сохранённого контента (для дедупа `batch_listing`)
+- `cleanup_old_raw_documents(client, days=120)` — TTL-очистка сырья
+
+**Analytics (`source_health`, `coverage_stats`):**
+- `record_source_health(client, source, city, events_found, errors, duration_sec, last_error)` —
+  пишет строку в лог `source_health` и пересчитывает агрегат `source_health_agg` (включая `success_rate`)
+- `record_coverage(client, city)` — снимок «сколько событий по каждому типу» в `coverage_stats`
+
 ---
 
 ### `dedup.py` — дедупликация
@@ -260,9 +378,11 @@ cities:
 - Возвращает только те URL, которых ещё нет в базе
 - Позволяет не тратить LLM-запросы на уже обработанные страницы
 
-**`get_source_hash` / `set_source_hash`** (для `batch_listing`)
-- Хранят SHA-256 листинга в таблице `parse_state` по ключу `(city, source)`
+**Дедуп `batch_listing`** — по хешу контента в `raw_documents` (см. `db.get_raw_document_hash`
+/ `db.save_raw_document`)
+- SHA-256 листинга хранится в `raw_documents.hash` (по `url`), там же лежит само сырьё
 - Если HTML листинга не менялся с прошлого прогона — весь LLM/JSON-LD-вызов пропускается
+- Хеш фиксируется только после успешного извлечения (упавший прогон повторится)
 - Существующие события при этом остаются в БД (upsert ничего не трогает)
 
 ---
@@ -274,6 +394,14 @@ cities:
 - Генерирует `slug` через `_make_slug(title, date)`
 - Формирует `id = {city}-{slug}`
 - Проставляет `parsed_at = utcnow()`
+- Если теги пустые (direct_api) — подставляет авто-теги `default_tags_for_type(type)`
+- Вычисляет `fingerprint` через `_fingerprint(title, date, venue_name)`
+
+**`_fingerprint(title, date, venue)` / `_normalize(s)`**
+- `_normalize` приводит строку к канону: нижний регистр, `ё→е`, без пунктуации, схлопнутые пробелы
+- `_fingerprint` = `sha256(normalize(title)|date|normalize(venue))[:16]`
+- Одно и то же событие из разных источников даёт одинаковый fingerprint → кросс-источниковый дедуп
+- **Без UNIQUE** намеренно: сначала собираем статистику (`duplicate_candidates`), constraint позже
 
 **`_make_slug(title, date)`**
 - Кириллица → транслитерация (встроенный словарь: я→ya, ж→zh, ш→sh и т.д.)
@@ -411,9 +539,27 @@ cities:
 `EventType`. Источник в `seeds.yaml` **закомментирован**: данные KudaGo по Сочи устарели, Пермь
 не поддерживается. Код готов на случай обновления данных.
 
+### `sources/candidate_sources.py` — Discovery новых источников
+
+Контур масштабирования каталога: **поиск в интернете → скоринг → `candidate_sources` → ручная
+модерация → `seeds.yaml`**. Запускается командой `discover-sources` (раз в неделю).
+
+- **`SearchProvider`** (ABC) — интерфейс поисковика. Реализация `DuckDuckGoProvider` (HTML, без ключа,
+  для MVP). Вынесен за интерфейс, чтобы заменить на Serper API без изменения остального кода.
+- **`discover_sources(city, supabase, dry_run)`** — точка входа: гоняет типовые запросы
+  (`квиз {city}`, `стендап {city}`, `мастер-класс {city}`, `детские мероприятия {city}`, `афиша {city}`),
+  агрегирует домены, считает score, пишет в БД.
+- **Скоринг кандидата:** `+3` если на странице найден JSON-LD типа `Event`; `+2` если в пути есть
+  `/events`/`/afisha`/`/schedule`; `+1` за каждый дополнительный запрос, в котором встретился домен.
+- **Фильтры:** пропускаются домены из `seeds.yaml`, домены со статусом `rejected`, агрегаторы/соцсети.
+- **`save_candidates`** сохраняет с **сохранением статуса** (не перетирает `approved`/`rejected`)
+  и обновляет `last_seen` — для очистки мусора, который давно не встречается.
+
 ---
 
-## GitHub Actions (`.github/workflows/parse.yml`)
+## GitHub Actions
+
+### `.github/workflows/parse.yml` — ежедневный парсинг
 
 **Триггеры:**
 - Cron: `0 21 * * *` (21:00 UTC = 00:00 МСК) — ежедневно
@@ -443,6 +589,16 @@ cities:
 | `VERCEL_DEPLOY_HOOK` | URL хука деплоя Vercel |
 | `TG_BOT_TOKEN` | Telegram-бот для алертов (опционально) |
 | `TG_CHAT_ID` | chat_id для алертов (опционально) |
+
+### `.github/workflows/discover_sources.yml` — еженедельный поиск источников
+
+**Триггеры:**
+- Cron: `0 20 * * 0` (воскресенье 20:00 UTC = 23:00 МСК) — раз в неделю
+- `workflow_dispatch` — ручной запуск
+
+**Матрица:** `perm` и `sochi` параллельно. Запускает `python -m parser.cli discover-sources --city {city}`.
+Нужны только секреты `SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` (LLM-ключи не требуются).
+Результат — кандидаты в таблице `candidate_sources` для ручной модерации.
 
 ---
 
@@ -491,7 +647,7 @@ Next.js 16 App Router, полностью статический (SSG), React 19
 - Чекбокс «только с фиксированной датой» (скрывает `always`-события)
 
 **`lib/types.ts`** — типы TypeScript:
-- `EventItem` — зеркало `EventRow` в camelCase
+- `EventItem` — зеркало `EventRow` в camelCase (включая `tags: string[]`)
 - `CITY_CONFIG` — метаданные городов (label, path, metaTitle, description)
 - `EVENT_TYPE_LABELS` — отображаемые названия типов
 
@@ -532,7 +688,7 @@ Next.js 16 App Router, полностью статический (SSG), React 19
 | `city` | text | `perm` или `sochi` |
 | `slug` | text UNIQUE | URL-идентификатор (транслит + дата) |
 | `title` | text | Название события |
-| `type` | text | `quiz` / `standup` / `bowling` / `billiards` / `karting` |
+| `type` | text | `EventType`: ниша (`quiz`/`standup`/`bowling`/…) + широкие (`concert`/`theater`/`cinema`/…) |
 | `date` | text | `YYYY-MM-DD` или `always` |
 | `time_start` | text | `HH:MM` |
 | `price_min` | int | Минимальная цена |
@@ -545,8 +701,74 @@ Next.js 16 App Router, полностью статический (SSG), React 19
 | `description` | text | Описание |
 | `organizer` | text | Организатор |
 | `district` | text | Район города |
+| `tags` | text[] | Теги из закрытого набора (для подборок/рекомендаций) |
+| `tags_version` | int | Версия таксономии тегов, с которой извлечено событие |
+| `fingerprint` | text | Хеш `title+date+venue` для кросс-источниковой дедупликации (без UNIQUE) |
+| `venue_id` | text | Ссылка на площадку (планируется, см. «Будущая модель данных») |
 | `source` | text | Имя источника из seeds |
 | `parsed_at` | timestamptz | Время последнего обновления |
+
+Теги задаются закрытым набором в `parser/src/parser/taxonomy.py` (константа `TAGS_VERSION`).
+LLM-экстракторы выбирают теги из набора; для `direct_api`-источников теги проставляются
+автоматически по типу события. При изменении набора поднимается `TAGS_VERSION` — события
+со старой версией можно перепарсить.
+
+### Таблица `parse_state` (legacy — заменена на `raw_documents`)
+
+| Поле | Тип | Описание |
+|------|-----|---------|
+| `city` | text | Город (часть PK) |
+| `source` | text | Имя источника (часть PK) |
+| `content_hash` | text | SHA-256 последнего HTML листинга |
+| `updated_at` | timestamptz | Время записи хеша |
+
+Если хеш листинга совпадает с прошлым прогоном — LLM/JSON-LD не вызываются.
+
+> Со временем `parse_state` заменяется таблицей `raw_documents` (хеш хранится там же).
+
+### Таблица `raw_documents` (Ingestion) — сырьё
+
+| Поле | Тип | Описание |
+|------|-----|---------|
+| `id` | uuid | PK |
+| `source` | text | Имя источника |
+| `url` | text UNIQUE | Адрес страницы / API-запроса |
+| `content` | text | Сырой HTML / JSON / XML / RSS |
+| `content_type` | text | `html` / `json` / `xml` / `rss` |
+| `hash` | text | SHA-256 контента (дедуп вместо `parse_state`) |
+| `fetched_at` | timestamptz | Время загрузки |
+
+Хранит сырьё, чтобы менять промпты/модели/теги без повторного обхода сайтов. Сжатие — на стороне
+Postgres TOAST (колонка `text`), TTL — 90–180 дней.
+
+### Таблица `candidate_sources` (Discovery) — кандидаты в источники
+
+| Поле | Тип | Описание |
+|------|-----|---------|
+| `domain` | text PK | Домен кандидата |
+| `city` | text | Город |
+| `queries` | text[] | Поисковые запросы, в которых встретился |
+| `score` | int | Рейтинг полезности (JSON-LD Event, путь `/events`, частота) |
+| `has_jsonld_event` | bool | Найден ли Schema.org Event |
+| `status` | text | `new` / `approved` / `rejected` |
+| `found_at` / `last_seen` | timestamptz | Первая и последняя находка |
+
+### Таблицы `source_health` / `source_health_agg` (Analytics) — здоровье источников
+
+`source_health` — лог запусков (`events_found`, `errors`, `duration_sec`, `last_error`).
+`source_health_agg` — агрегат на источник (`last_success`, `avg_events`, `success_rate`, `total_errors`)
+для быстрого дашборда «что сломалось».
+
+### Таблица `coverage_stats` (Analytics) — покрытие по категориям
+
+Ежедневный снимок `(city, category, count, snapshot_date)`. Позволяет видеть тренды и замечать
+выпадение категорий (например, квизы упали с 25 до 2 — сломался источник).
+
+### Будущая модель данных — `venues`
+
+Когда карточек станет 1000+, площадки выносятся в отдельную таблицу `venues`
+(`id, name, address, district, city`), а `events.venue_id` ссылается на неё —
+для страниц площадок, SEO и рекомендаций.
 
 ---
 
@@ -591,7 +813,39 @@ python -m parser.cli run --city sochi
 
 # Один источник с другим провайдером
 python -m parser.cli run --city perm --source quizplease --provider groq
+
+# Discovery новых источников (поиск → candidate_sources)
+python -m parser.cli discover-sources --city perm            # боевой (пишет в БД)
+python -m parser.cli discover-sources --city perm --dry-run  # только вывод кандидатов
 ```
+
+**Полный список команд:**
+
+| Команда | Назначение | Пишет в БД |
+|---------|-----------|-----------|
+| `discover --city <c> [--source <s>]` | Отладка краулера: только список найденных URL | нет |
+| `run --city <c>` | Полный пайплайн (discovery → extract → write) | да |
+| `run --city <c> --dry-run` | Прогон LLM без записи (проверка качества) | нет |
+| `run --city <c> --source <s>` | Один источник | да |
+| `run … --provider gemini\|groq\|deepseek` | Override LLM-провайдера | да |
+| `run … --mode per_url\|batch_listing\|direct_api` | Override режима | да |
+| `discover-sources --city <c>` | Поиск новых источников → `candidate_sources` | да |
+| `discover-sources --city <c> --dry-run` | Поиск без записи (только вывод) | нет |
+
+### Миграции БД
+
+Схема версионируется SQL-файлами в `supabase/migrations/` (применять по порядку):
+
+```bash
+# Через Supabase CLI (нужен залогиненный supabase + связанный проект)
+supabase db push
+
+# Либо вручную: выполнить каждый файл из supabase/migrations/ в SQL Editor по возрастанию имени
+```
+
+Все миграции идемпотентны (`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`) — повторное применение
+безопасно. Новые таблицы (`raw_documents`, `source_health*`, `coverage_stats`, `candidate_sources`)
+создаются с включённым RLS без политик — доступ только у `service_role` (которым пишет парсер).
 
 ### Фронтенд
 
@@ -633,3 +887,5 @@ npm run dev
 2. Проверь дискавери: `python -m parser.cli discover --city perm --source my-source`
 3. Если URL находятся — сухой прогон: `python -m parser.cli run --city perm --source my-source --dry-run`
 4. Боевой прогон: `python -m parser.cli run --city perm --source my-source`
+
+Для `direct_api`-источников (`twogis`/`timepad`/`kudago`) дискавери не нужен — задаётся `provider` (и для `twogis` ещё `api_query` + `event_type`), сразу `run --dry-run`.

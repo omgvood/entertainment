@@ -10,6 +10,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from .taxonomy import TAGS_VERSION, filter_tags
+
 # Узкая ниша MVP-1 (Пермь + Сочи) + широкая афиша MVP-2 (Timepad: тип по категории события).
 EventType = Literal[
     "quiz", "standup", "bowling", "billiards", "karting",
@@ -38,6 +40,15 @@ class ParsedEvent(BaseModel):
     image_url: Optional[str] = None
     description: Optional[str] = Field(default=None, max_length=500)
     organizer: Optional[str] = None
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Теги из закрытого набора taxonomy.ALLOWED_TAGS (для подборок/рекомендаций)",
+    )
+
+    @field_validator("tags")
+    @classmethod
+    def _filter_tags(cls, v: list[str]) -> list[str]:
+        return filter_tags(v)
 
     @field_validator("date")
     @classmethod
@@ -79,6 +90,9 @@ class EventRow(ParsedEvent):
     source_url: str
     source: str
     parsed_at: str
+    tags_version: int = TAGS_VERSION
+    fingerprint: str = ""
+    """Хеш title+date+venue для кросс-источниковой дедупликации (без UNIQUE, см. validator)."""
 
     @staticmethod
     def make_parsed_at_now() -> str:
