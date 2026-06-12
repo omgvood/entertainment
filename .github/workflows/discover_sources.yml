@@ -1,0 +1,41 @@
+name: Discover sources
+
+# Еженедельный поиск новых источников (Discovery). Воскресенье 20:00 UTC = 23:00 МСК.
+on:
+  schedule:
+    - cron: "0 20 * * 0"
+  workflow_dispatch:  # ручной запуск из UI
+
+jobs:
+  discover-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: Production
+    strategy:
+      matrix:
+        city: [perm, sochi]
+      fail-fast: false
+
+    defaults:
+      run:
+        working-directory: parser
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: parser/pyproject.toml
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Discover sources — ${{ matrix.city }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python -m parser.cli discover-sources --city ${{ matrix.city }}
