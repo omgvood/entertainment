@@ -16,6 +16,7 @@ Python-парсер (parser/)
     ├── direct_api: 2ГИС / Timepad → ParsedEvent (без LLM)
     ├── vk_posts: посты VK-сообществ → префильтр → LLM (1 вызов/группу)  [сервисный ключ]
     ├── vk_events: события-сообщества → ParsedEvent без LLM  [отключён: нужен user-токен]
+    ├── telegram_posts: посты публичных каналов (t.me/s/) → префильтр → LLM (1 вызов/канал)
     ├── generic: одобренные candidate_sources → JSON-LD / LLM (длинный хвост)
     ├── Discovery: краулер HTML / sitemap (для listing-источников)
     ├── Extraction: JSON-LD (Schema.org) → фолбэк LLM (Gemini / Groq / DeepSeek)
@@ -41,10 +42,10 @@ Vercel CDN ← пользователь
 | Подсистема | Что входит | Назначение |
 |-----------|-----------|-----------|
 | **Discovery** | `candidate_sources` | Поиск новых источников → модерация → `seeds.yaml` или **generic-парсер** (одобренные домены парсятся без ручного кода) |
-| **Ingestion** | crawlers + API-клиенты (2ГИС/Timepad/VK) + `raw_documents` | Получение и хранение сырого контента |
-| **Extraction** | JSON-LD / LLM / теги | Превращение сырья в `ParsedEvent` |
+| **Ingestion** | crawlers + API-клиенты (2ГИС/Timepad/VK/Telegram) + `raw_documents` | Получение и хранение сырого контента |
+| **Extraction** | JSON-LD / LLM / теги + `classifiers` (префильтр) | Превращение сырья в `ParsedEvent` |
 | **Merge** | `merge.py` + `SourceConfig.priority` | Кросс-источниковое слияние дублей по `id` с обогащением полей |
-| **Analytics** | `source_health` + `coverage_stats` | Мониторинг здоровья источников и полноты покрытия |
+| **Analytics** | `source_health` + `source_quality` + `coverage_stats` | Здоровье источников, их ценность (уникальность) и полнота покрытия |
 
 ---
 
@@ -61,7 +62,7 @@ Vercel CDN ← пользователь
 | Театр | Timepad | ✅ |
 | Выставки | Timepad | ✅ |
 | Квизы | QuizPlease + Timepad | ✅ |
-| Стендап | Timepad (partial) | ⚠️ нет своей категории в Timepad |
+| Стендап | Timepad (partial) + Telegram | ⚠️ нет категории в Timepad; Telegram-каналы организаторов закрывают пробел |
 | Квесты | 2ГИС | ✅ |
 | Боулинг | 2ГИС | ✅ |
 | Детям | Timepad (partial) | ⚠️ |
@@ -102,13 +103,18 @@ Vercel CDN ← пользователь
 |-------------|----------|-----|
 | **Теги** (`tags` + `tags_version`) | Основа подборок/рекомендаций. Закрытый набор, версионируемый. LLM выбирает из набора, direct_api получает авто-теги по типу | `taxonomy.py`, `models.py`, промпты экстракторов |
 | **VK-источники** | `vk-posts` (посты кураторских сообществ + префильтр + LLM, 1 вызов/группу) — работает на сервисном ключе. `vk-events` (события-сообщества без LLM) готов, но отключён: `groups.search` требует user-токен | `sources/vk.py`, режимы `vk_posts`/`vk_events` |
+| **Telegram-источник** | `telegram-posts` (посты публичных каналов через веб-превью `t.me/s/`, без авторизации) — fetch → префильтр → LLM (1 вызов/канал). Каналы — объекты с `source_type`/`priority`/`enabled`; провайдер за абстракцией (HTML сейчас, MTProto позже) | `sources/telegram.py`, режим `telegram_posts` |
+| **Общий классификатор** | `is_event_candidate(text, source_type)` — единый префильтр «пост похож на анонс» для VK/Telegram/будущих источников. Порог зависит от типа: агрегатор строже, организатор мягче | `classifiers.py` |
+| **Source Type** | Природа источника (`api`/`aggregator`/`organizer`/`venue`/`social`) — управляет строгостью префильтра и осмыслением метрик | `config.py` (`SourceType`) |
 | **Generic-парсер** | Одобренные в `candidate_sources` домены парсятся автоматически (JSON-LD → LLM в пределах бюджета) — замыкает цикл Discovery → Ingestion | `sources/generic.py`, режим `generic` |
 | **Discovery источников** | Поиск новых сайтов → скоринг → `candidate_sources` → модерация → `seeds.yaml` или generic | `sources/candidate_sources.py`, команда `discover-sources` |
 | **Cross-source merge** | Слияние дублей одного события из разных источников по `id` с учётом `priority` и обогащением пустых полей | `merge.py`, `pipeline.py` |
 | **Raw Documents** | Хранение сырья (HTML/JSON) для перепарса без повторного краулинга; здесь же хеш для дедупа | `db.py` (`save_raw_document`), таблица `raw_documents` |
 | **Source Health** | Лог + агрегат по источникам: `events_found`, `errors`, `duration_sec`, `success_rate` | `db.py` (`record_source_health`), таблицы `source_health*` |
+| **Source Quality** | Ежедневный снимок ценности источника: `unique_events_ratio` (сколько событий уникальны, а сколько дублируют другие источники в merge) — видно, стоит ли держать источник | `db.py` (`record_source_quality`), таблица `source_quality` |
 | **Coverage Stats** | Ежедневный снимок покрытия по категориям — видно тренды и выпадение категорий | `db.py` (`record_coverage`), таблица `coverage_stats` |
 | **Source priority** | Приоритет источника для разрешения дублей в merge | `config.py` (`SourceConfig.priority`) |
+| **Venues (инфраструктура)** | Площадки как отдельная сущность (`venues`): primary в Supabase, бекап-снимок в git через `export-venues` (workflow раз в неделю). Фронтенд пока не подключён — 2ГИС из пайплайна не удалён | `cli.py` (`export-venues`), таблица `venues`, `backup_venues.yml` |
 
 Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
 
@@ -123,10 +129,11 @@ entertainment/
 │   │   └── seeds.yaml              — источники по городам (URL, режим, тип)
 │   ├── src/parser/
 │   │   ├── cli.py                  — точка входа CLI (discover / discover-sources / run)
-│   │   ├── config.py               — Settings + SourceConfig (с priority) + загрузка seeds
+│   │   ├── config.py               — Settings + SourceConfig + SourceType + TelegramChannelConfig + seeds
 │   │   ├── models.py               — ParsedEvent, EventRow (Pydantic) + tags/fingerprint
 │   │   ├── taxonomy.py             — закрытый набор тегов + TAGS_VERSION + авто-теги
-│   │   ├── pipeline.py             — оркестратор пайплайна + health/coverage/merge
+│   │   ├── classifiers.py          — общий префильтр is_event_candidate (VK/Telegram/…)
+│   │   ├── pipeline.py             — оркестратор пайплайна + health/coverage/quality/merge
 │   │   ├── merge.py                — кросс-источниковое слияние дублей по id (priority)
 │   │   ├── db.py                   — upsert + cleanup + raw_documents/health/coverage
 │   │   ├── dedup.py                — фильтрация известных URL (per_url)
@@ -146,6 +153,7 @@ entertainment/
 │   │       ├── timepad.py          — Timepad API, широкая афиша; тип по категории (без LLM)
 │   │       ├── kudago.py           — KudaGo API, широкая афиша (без LLM; Сочи-пилот, отключён)
 │   │       ├── vk.py               — VK API: события-сообщества (без LLM) + посты (LLM)
+│   │       ├── telegram.py         — Telegram: посты публичных каналов через t.me/s/ (LLM)
 │   │       ├── generic.py          — generic-парсер одобренных candidate_sources (JSON-LD/LLM)
 │   │       └── candidate_sources.py — Discovery новых источников (поиск → скоринг → БД)
 │   ├── tests/                      — pytest тесты
@@ -181,7 +189,8 @@ entertainment/
 │
 ├── .github/workflows/
 │   ├── parse.yml                   — CI/CD: ежедневный запуск парсера
-│   └── discover_sources.yml        — еженедельный поиск новых источников
+│   ├── discover_sources.yml        — еженедельный поиск новых источников
+│   └── backup_venues.yml           — еженедельный снимок venues в git (бекап)
 │
 ├── input/                          — образцы JSON-данных для тестирования
 ├── prototype/                      — ранний UI-прототип (HTML/CSS)
@@ -212,7 +221,7 @@ entertainment/
 | `--source NAME` | Запустить только один источник (опционально) |
 | `--dry-run` | LLM работает, но в БД не пишет. Для проверки качества извлечения |
 | `--provider gemini\|groq\|deepseek` | Переключить LLM-провайдер разово |
-| `--mode per_url\|batch_listing\|direct_api\|vk_events\|vk_posts\|generic` | Переопределить режим извлечения |
+| `--mode per_url\|batch_listing\|direct_api\|vk_events\|vk_posts\|telegram_posts\|generic` | Переопределить режим извлечения |
 
 Возвращает код выхода 0 если хотя бы половина событий извлечена успешно, иначе 1.
 
@@ -233,11 +242,19 @@ entertainment/
 
 **`SourceConfig`** — конфигурация одного источника из `seeds.yaml`:
 - `name` — уникальное имя источника
-- `extraction_mode` — `per_url` / `batch_listing` / `direct_api` / `vk_events` / `vk_posts` / `generic`
+- `extraction_mode` — `per_url` / `batch_listing` / `direct_api` / `vk_events` / `vk_posts` / `telegram_posts` / `generic`
 - `priority` — приоритет источника при кросс-источниковом merge (выше — побеждает), дефолт `0`
 - Для `per_url`/`batch_listing`: `kind` (listing/sitemap), `url`, `url_pattern` (regex)
 - Для `direct_api`: `provider` (`twogis` / `timepad` / `kudago`). `twogis` требует `api_query` + `event_type`; `timepad`/`kudago` тип определяют сами по категории (доп. полей не нужно)
 - Для `vk_events`: опц. `vk_city_id` (ID города VK для `groups.search`). Для `vk_posts`: `vk_groups` — список screen-name'ов кураторских сообществ
+- Для `telegram_posts`: `telegram_sources` — список каналов (объекты `channel` / `source_type` / `priority` / `enabled`)
+
+**`SourceType`** (enum) — природа источника: `api` / `aggregator` / `organizer` / `venue` / `social`.
+Управляет строгостью префильтра (`classifiers.is_event_candidate`) и осмыслением метрик качества.
+
+**`TelegramChannelConfig`** — один Telegram-канал: `channel` (screen-name без `https://t.me/`),
+`source_type` (дефолт `social`), `priority` (дефолт `40`), `enabled` (дефолт `true`). Объект, а не
+строка — чтобы отключать канал и менять приоритет без правок кода.
 
 **`CityConfig`** — список источников одного города.
 
@@ -272,6 +289,7 @@ cities:
 - `direct_api` — вызов внешнего API (2ГИС / Timepad / KudaGo), маппинг JSON → `ParsedEvent` без LLM
 - `vk_events` — VK-сообщества типа «событие» (нативные `start_date`/`place`) → `ParsedEvent` без LLM
 - `vk_posts` — посты со стен `vk_groups`: префильтр (дата/маркеры/билеты) → один `extract_many` на группу
+- `telegram_posts` — посты публичных каналов `telegram_sources` (веб-превью `t.me/s/`, без авторизации): префильтр (строгость по `source_type`) → один `extract_many` на канал
 - `generic` — одобренные в `candidate_sources` домены: JSON-LD, иначе LLM в пределах бюджета (длинный хвост)
 
 ---
@@ -336,11 +354,11 @@ LLM-экстракторы получают список разрешённых 
 
 Главная функция, запускается из CLI для каждого города:
 1. Перебирает источники из `CityConfig`, замеряя длительность каждого
-2. Для каждого вызывает нужный runner (`_run_per_url_source`, `_run_batch_source`, `_run_direct_api_source`, `_run_vk_events_source`, `_run_vk_posts_source`, `_run_generic_source`)
+2. Для каждого вызывает нужный runner (`_run_per_url_source`, `_run_batch_source`, `_run_direct_api_source`, `_run_vk_events_source`, `_run_vk_posts_source`, `_run_telegram_posts_source`, `_run_generic_source`)
 3. Пишет здоровье источника в `source_health` (`record_source_health`)
 4. **Cross-source merge** (`merge.merge_rows`): группирует строки по `id` (= city+slug), выбирает победителя по `priority`, обогащает его пустые поля из проигравших; в боевом режиме подмешивает существующие строки из БД (`fetch_events_by_ids`), чтобы не даунгрейдить карточку источником с меньшим приоритетом
 5. Upsert в БД (слияние делит `id` → upsert по slug перезаписывает на месте, удалений не нужно)
-6. Очистка: `cleanup_old_events` + `cleanup_old_raw_documents` (TTL) + снимок `record_coverage`
+6. Очистка: `cleanup_old_events` + `cleanup_old_raw_documents` (TTL) + снимки `record_coverage` и `record_source_quality` (доля уникальных событий по источникам через `_source_quality`)
 7. Возвращает `PipelineResult` (discovered / new / extracted / failed / written / **merged** / **near_misses** / **merged_by_source**)
 
 > **`merged_by_source`** (разбивка «источник-проигравший → победитель») — KPI для оценки реальной ценности нового источника: видно, сколько событий VK уникальны, а сколько дублируют Timepad. **`near_misses`** (та же площадка+дата, разные названия) — сигнал-кандидат для будущего fuzzy-матчинга, пока только логируется.
@@ -385,9 +403,11 @@ LLM-экстракторы получают список разрешённых 
 - `get_raw_document_hash(client, url)` — хеш последнего сохранённого контента (для дедупа `batch_listing`)
 - `cleanup_old_raw_documents(client, days=120)` — TTL-очистка сырья
 
-**Analytics (`source_health`, `coverage_stats`):**
+**Analytics (`source_health`, `source_quality`, `coverage_stats`):**
 - `record_source_health(client, source, city, events_found, errors, duration_sec, last_error)` —
   пишет строку в лог `source_health` и пересчитывает агрегат `source_health_agg` (включая `success_rate`)
+- `record_source_quality(client, city, per_source)` — снимок ценности источников в `source_quality`
+  (`unique_events_ratio` = доля событий, не проигравших merge другому источнику)
 - `record_coverage(client, city)` — снимок «сколько событий по каждому типу» в `coverage_stats`
 
 ---
@@ -445,7 +465,7 @@ LLM-экстракторы получают список разрешённых 
 - **Чистые функции** — без обращения к БД, тестируются изолированно (`tests/test_merge.py`).
 - **Fuzzy-матчинг отложен** — нормализация уже ловит регистр/пунктуацию/ё; разные названия одного события (`near_misses`) пока только считаются, не схлопываются.
 
-Приоритеты в `seeds.yaml`: `timepad` 100, `vk-events` 80, `twogis-*` 70, `quizplease` 60, `vk-posts` 40, `generic` 20.
+Приоритеты в `seeds.yaml`: `timepad` 100, `vk-events` 80, `twogis-*` 70, `quizplease` 60, `telegram-posts` 45, `vk-posts` 40, `generic` 20.
 
 ---
 
@@ -463,9 +483,30 @@ LLM-экстракторы получают список разрешённых 
   нужен пользовательский токен. Код и тесты готовы, ждут user-токена.
 - **`vk_posts`** — `fetch_wall_posts(group)`: посты со стен `vk_groups`. **Работает на сервисном
   ключе** (`wall.get` доступен; закрытые группы пропускаются по `VkApiError`). Перед LLM — **префильтр**
-  `is_event_candidate()` (есть дата/время, маркеры «билеты»/«регистрация»/«вход», ссылка на Timepad)
+  `classifiers.is_event_candidate()` (есть дата/время, маркеры «билеты»/«регистрация»/«вход», ссылка на Timepad)
   и фильтр свежести 14 дней; дедуп постов через `raw_documents` (хеш текста). Посты-кандидаты
   (≤20/группу) склеиваются в один документ → **один** `extract_many` на группу (экономия токенов).
+
+> Префильтр `is_event_candidate` вынесен в общий модуль `classifiers.py` (используется и VK, и Telegram).
+
+### `sources/telegram.py` — Telegram (посты публичных каналов)
+
+Telegram-каналы локальных организаторов (стендап/квизы/театры) в РФ часто активнее VK и анонсируют
+раньше. Публичные каналы доступны **без авторизации** через веб-превью `https://t.me/s/{channel}`.
+
+- **`TelegramProvider`** (ABC) — абстракция провайдера. Единственная реализация —
+  **`TelegramHtmlProvider`** (парсит веб-превью). Если HTML-превью сломают/заблокируют или понадобятся
+  закрытые каналы — добавится второй провайдер (MTProto/telethon) без правок pipeline. Заглушку заранее
+  не делаем — добавим по реальной необходимости.
+- **`parse_channel_html`** — чистая функция: HTML → `[{text, url, date_unix}]` (тестируется без сети).
+  Посты без текста (только фото) пропускаются. Структура селекторов задокументирована в коде —
+  чинить тут, если разметка `t.me/s/` поедет.
+- **Режим `telegram_posts`** (`pipeline._run_telegram_posts_source`): зеркало `vk_posts`. Каналы —
+  объекты `TelegramChannelConfig` (можно отключать/менять приоритет). Префильтр
+  `classifiers.is_event_candidate(text, source_type)` — **строгость зависит от типа канала**: у агрегатора
+  (много рекламы/мемов) нужна дата И маркер, у организатора достаточно одного сигнала. Свежесть 14 дней,
+  дедуп через `raw_documents`, **один** `extract_many` на канал. `source_url` события — ссылка на канал
+  (точная ссылка на пост хранится per-post в `raw_documents` — там и смотрим происхождение).
 
 ### `sources/generic.py` — generic-парсер кандидатов
 
@@ -836,16 +877,30 @@ Postgres TOAST (колонка `text`), TTL — 90–180 дней.
 `source_health_agg` — агрегат на источник (`last_success`, `avg_events`, `success_rate`, `total_errors`)
 для быстрого дашборда «что сломалось».
 
+### Таблица `source_quality` (Analytics) — ценность источника
+
+Ежедневный снимок `(source, city, snapshot_date, events_found, unique_events, unique_events_ratio)`.
+`unique_events` = события источника, не проигравшие кросс-источниковый merge (т.е. не дубли других
+источников). Низкий `unique_events_ratio` → источник почти полностью дублирует другие, и его можно
+отключить. Отвечает на вопрос «**стоит ли держать источник**» (в отличие от `source_health`, который
+отвечает «работает ли он»). Считается в `pipeline._source_quality` по `merge.merged_by_source`.
+
 ### Таблица `coverage_stats` (Analytics) — покрытие по категориям
 
 Ежедневный снимок `(city, category, count, snapshot_date)`. Позволяет видеть тренды и замечать
 выпадение категорий (например, квизы упали с 25 до 2 — сломался источник).
 
-### Будущая модель данных — `venues`
+### Таблица `venues` — постоянные заведения (инфраструктура)
 
-Когда карточек станет 1000+, площадки выносятся в отдельную таблицу `venues`
-(`id, name, address, district, city`), а `events.venue_id` ссылается на неё —
-для страниц площадок, SEO и рекомендаций.
+Площадки (боулинг/картинг/бильярд/квесты) как отдельная сущность: `id, city, name, type, address,
+district, image_url, source, updated_at`. Площадка — не событие (нет даты, меняется редко).
+**Primary source of truth = Supabase** (правится через Table Editor); бекап — периодический снимок
+в git через `parser-cli export-venues` (workflow `backup_venues.yml`, раз в неделю).
+
+> ⚠️ **Инфраструктура под будущий перенос.** Фронтенд пока читает постоянные места из `events`
+> (`date='always'`, источник 2ГИС), поэтому 2ГИС из пайплайна **не удалён** — иначе боулинг/картинг
+> пропадут с сайта. Следующий шаг: подключить фронтенд к `venues` и перенести постоянные места из
+> `events` в `venues` (тогда `events.venue_id` сошлётся на неё для страниц площадок и SEO).
 
 ### Future (зафиксировано, не реализовано)
 
@@ -856,6 +911,29 @@ Postgres TOAST (колонка `text`), TTL — 90–180 дней.
   `last_verified`/`status` и дрейфует в сторону реестра источников; возможна будущая консолидация с `seeds.yaml`.
 - **Дедуп v2** — per-field priority, freshness weighting (VK свежее знает о переносе/отмене),
   fuzzy-матчинг по накопленным `near_misses`.
+
+### Потенциальные доработки (следующие шаги)
+
+Вытекают из недавних изменений (Telegram / organizer / venues / source_quality):
+
+- **Расширить список Telegram-каналов** — в `seeds.yaml` сейчас стартовые 3 канала Перми (нужно
+  проверить и довести до ~15-20: организаторы + агрегаторы; для Сочи — добавить с нуля). Открыть
+  `https://t.me/s/<channel>` и убедиться, что превью отдаёт посты.
+- **Telegram через MTProto** — если веб-превью `t.me/s/` начнут блокировать/ломать или понадобятся
+  закрытые каналы: добавить `TelethonProvider` (реализация `TelegramProvider`), хранить сессию в
+  GitHub Secrets. Pipeline менять не нужно.
+- **Страницы организаторов** (`/organizers/{slug}`) — теперь, когда `organizer` заполняется
+  консистентно (LLM-промпты + Timepad/VK), можно собирать страницы «все события QuizPlease / Театр-Театр».
+  Хороший источник органического SEO-трафика. Потребует таблицу `organizers` (FK из `events`).
+- **Подключить фронтенд к `venues`** — перенести постоянные места (`date='always'`) из `events` в
+  `venues`, добавить страницы площадок, затем убрать 2ГИС из ежедневного пайплайна.
+- **2ГИС fallback (Playwright)** — если платный лимит API станет проблемой: браузерный сбор площадок
+  раз в 2-4 недели как fallback. Только для `venues`-контура (не для событий), запускать отдельным
+  workflow. Селекторы 2ГИС хрупкие — закладывать ручное обновление через `venues` Table Editor.
+- **Дашборд source_quality** — выводить `unique_events_ratio` по источникам в конце прогона (или
+  отдельной страницей), чтобы видеть, какие источники дублируют другие и не стоят поддержки.
+- **Discovery по дырявым категориям** — добавить в `candidate_sources.py` запросы для категорий со
+  статусом ❌/⚠️ (`экскурсии {city}`, `мастер-класс {city}`, `куда сходить с детьми {city}`).
 
 ---
 
@@ -904,9 +982,15 @@ python -m parser.cli run --city sochi
 # Один источник с другим провайдером
 python -m parser.cli run --city perm --source quizplease --provider groq
 
+# Telegram-каналы (один источник, сухой прогон)
+python -m parser.cli run --city perm --source telegram-posts --dry-run
+
 # Discovery новых источников (поиск → candidate_sources)
 python -m parser.cli discover-sources --city perm            # боевой (пишет в БД)
 python -m parser.cli discover-sources --city perm --dry-run  # только вывод кандидатов
+
+# Бекап площадок: снимок таблицы venues в SQL-файл (для коммита в git)
+python -m parser.cli export-venues --output supabase/seeds/venues.sql
 ```
 
 **Полный список команд:**
@@ -918,9 +1002,10 @@ python -m parser.cli discover-sources --city perm --dry-run  # только вы
 | `run --city <c> --dry-run` | Прогон LLM без записи (проверка качества) | нет |
 | `run --city <c> --source <s>` | Один источник | да |
 | `run … --provider gemini\|groq\|deepseek` | Override LLM-провайдера | да |
-| `run … --mode per_url\|batch_listing\|direct_api\|vk_events\|vk_posts\|generic` | Override режима | да |
+| `run … --mode …\|vk_posts\|telegram_posts\|generic` | Override режима | да |
 | `discover-sources --city <c>` | Поиск новых источников → `candidate_sources` | да |
 | `discover-sources --city <c> --dry-run` | Поиск без записи (только вывод) | нет |
+| `export-venues [--city <c>] --output <path>` | Снимок таблицы `venues` в SQL-файл (бекап) | нет |
 
 ### Миграции БД
 
@@ -934,8 +1019,10 @@ supabase db push
 ```
 
 Все миграции идемпотентны (`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`) — повторное применение
-безопасно. Новые таблицы (`raw_documents`, `source_health*`, `coverage_stats`, `candidate_sources`)
-создаются с включённым RLS без политик — доступ только у `service_role` (которым пишет парсер).
+безопасно. Новые таблицы (`raw_documents`, `source_health*`, `source_quality`, `coverage_stats`,
+`candidate_sources`) создаются с включённым RLS без политик — доступ только у `service_role` (которым
+пишет парсер). Исключение — `venues`: RLS с политикой публичного чтения (`SELECT USING (true)`), т.к.
+площадки предназначены для отображения на сайте.
 
 ### Фронтенд
 

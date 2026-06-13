@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -100,8 +101,38 @@ class Settings:
 
 DiscoveryKind = Literal["sitemap", "listing"]
 ExtractionMode = Literal[
-    "per_url", "batch_listing", "direct_api", "vk_events", "vk_posts", "generic"
+    "per_url", "batch_listing", "direct_api",
+    "vk_events", "vk_posts", "telegram_posts", "generic",
 ]
+
+
+class SourceType(str, Enum):
+    """Природа источника. Влияет на строгость префильтра (classifiers) и осмысление метрик.
+
+    Источники принципиально разные: API отдаёт чистые структурированные данные, агрегатор —
+    много шума (реклама/мемы/новости), организатор — почти чистые анонсы. От типа зависит
+    порог отсечения постов перед LLM и интерпретация unique_events_ratio.
+    """
+
+    API = "api"                # Timepad, 2ГИС — структурированные данные
+    AGGREGATOR = "aggregator"  # афиша-паблики (много шума)
+    ORGANIZER = "organizer"    # сайт/канал конкретного организатора (мало шума)
+    VENUE = "venue"            # площадка
+    SOCIAL = "social"          # VK posts и прочие соцсети по умолчанию
+
+
+@dataclass(frozen=True)
+class TelegramChannelConfig:
+    """Один Telegram-канал для режима telegram_posts.
+
+    Объект, а не строка — чтобы отключать канал, менять приоритет и тип без правок кода.
+    """
+
+    channel: str
+    """Screen-name канала без https://t.me/ (например 'standupperm')."""
+    source_type: SourceType = SourceType.SOCIAL
+    priority: int = 40
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -134,6 +165,10 @@ class SourceConfig:
     vk_groups: list[str] = field(default_factory=list)
     """Список screen names кураторских VK-сообществ для vk_posts."""
 
+    # Для telegram_posts:
+    telegram_sources: list[TelegramChannelConfig] = field(default_factory=list)
+    """Telegram-каналы (объекты с channel/source_type/priority/enabled)."""
+
     """
     per_url:        дискавер N URL событий → N LLM-вызовов (по одному на страницу).
     batch_listing:  игнорируем дискавер, скачиваем url целиком и одним LLM-вызовом
@@ -142,6 +177,7 @@ class SourceConfig:
                     напрямую, без LLM. Используется для 2ГИС/Я.Карт.
     vk_events:      VK-сообщества типа «событие» → ParsedEvent напрямую (без LLM).
     vk_posts:       посты со стен vk_groups → префильтр → LLM extract_many (1 вызов на группу).
+    telegram_posts: посты публичных каналов (t.me/s/) → префильтр → LLM extract_many (1 вызов/канал).
     generic:        одобренные в candidate_sources домены → JSON-LD / LLM (длинный хвост).
     """
 
@@ -172,6 +208,15 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
                 event_type=s.get("event_type"),
                 vk_city_id=s.get("vk_city_id"),
                 vk_groups=s.get("vk_groups") or [],
+                telegram_sources=[
+                    TelegramChannelConfig(
+                        channel=t["channel"],
+                        source_type=SourceType(t.get("source_type", "social")),
+                        priority=t.get("priority", 40),
+                        enabled=t.get("enabled", True),
+                    )
+                    for t in (s.get("telegram_sources") or [])
+                ],
             )
             for s in city_raw["sources"]
         ]

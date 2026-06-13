@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 import httpx
 import structlog
@@ -117,6 +118,50 @@ async def _cmd_discover_sources(args: argparse.Namespace) -> int:
     return 0
 
 
+_VENUE_COLUMNS = (
+    "id", "city", "name", "type", "address", "district", "image_url", "source", "updated_at"
+)
+
+
+def _sql_literal(value: object) -> str:
+    """Значение → SQL-литерал (строки в кавычках с экранированием, None → NULL)."""
+    if value is None:
+        return "NULL"
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _cmd_export_venues(args: argparse.Namespace) -> int:
+    """Снимок таблицы venues в SQL-файл (бекап в git). Supabase free tier бекапов не делает."""
+    settings = Settings.from_env()
+    _setup_logging(settings.log_level)
+    supabase = make_client(settings.supabase_url, settings.supabase_service_key)
+
+    query = supabase.table("venues").select("*").order("id")
+    if args.city:
+        query = query.eq("city", args.city)
+    rows = query.execute().data or []
+
+    lines = [
+        "-- Снимок таблицы venues (автогенерация parser-cli export-venues).",
+        f"-- Строк: {len(rows)}" + (f", город: {args.city}" if args.city else ""),
+        "",
+    ]
+    for r in rows:
+        cols = ", ".join(_VENUE_COLUMNS)
+        vals = ", ".join(_sql_literal(r.get(c)) for c in _VENUE_COLUMNS)
+        updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in _VENUE_COLUMNS if c != "id")
+        lines.append(
+            f"INSERT INTO venues ({cols}) VALUES ({vals})\n"
+            f"  ON CONFLICT (id) DO UPDATE SET {updates};"
+        )
+
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Экспортировано venues: {len(rows)} → {out}")
+    return 0
+
+
 async def _cmd_run(args: argparse.Namespace) -> int:
     """Полный пайплайн."""
     settings = Settings.from_env()
@@ -176,6 +221,14 @@ def main() -> int:
         help="Не писать в candidate_sources, только вывести кандидатов",
     )
 
+    p_ev = sub.add_parser("export-venues", help="Снимок venues → SQL-файл (бекап в git)")
+    p_ev.add_argument("--city", help="Только один город (опц.)")
+    p_ev.add_argument(
+        "--output",
+        default="supabase/seeds/venues.sql",
+        help="Куда писать SQL (по умолчанию supabase/seeds/venues.sql)",
+    )
+
     p_run = sub.add_parser("run", help="Полный пайплайн")
     p_run.add_argument("--city", required=True)
     p_run.add_argument("--source", help="Имя одного источника")
@@ -193,7 +246,8 @@ def main() -> int:
     p_run.add_argument(
         "--mode",
         choices=[
-            "per_url", "batch_listing", "direct_api", "vk_events", "vk_posts", "generic"
+            "per_url", "batch_listing", "direct_api",
+            "vk_events", "vk_posts", "telegram_posts", "generic",
         ],
         default=None,
         help="Override extraction_mode из seeds.yaml (для разовых тестов)",
@@ -205,6 +259,8 @@ def main() -> int:
         return asyncio.run(_cmd_discover(args))
     if args.cmd == "discover-sources":
         return asyncio.run(_cmd_discover_sources(args))
+    if args.cmd == "export-venues":
+        return _cmd_export_venues(args)
     if args.cmd == "run":
         return asyncio.run(_cmd_run(args))
     return 1

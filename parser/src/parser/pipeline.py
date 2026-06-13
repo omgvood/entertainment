@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import httpx
 import structlog
 from supabase import Client
 
+from .classifiers import is_event_candidate
 from .config import CityConfig, SourceConfig
 from .db import (
     WriteStats,
@@ -22,6 +25,7 @@ from .db import (
     get_raw_document_hash,
     record_coverage,
     record_source_health,
+    record_source_quality,
     save_raw_document,
     upsert_events,
 )
@@ -30,7 +34,7 @@ from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
 from .merge import merge_rows
 from .models import EventRow, EventType, ParsedEvent
-from .sources import KudaGoClient, TimepadClient, TwoGisClient, VkClient
+from .sources import KudaGoClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
 from .sources import vk as vk_mod
 from .sources.generic import run_generic
 from .validator import to_event_row
@@ -115,6 +119,10 @@ async def run_city(
                 rows, sub = await _run_vk_posts_source(
                     client, source, extractor, supabase, city.slug, vk_service_key, dry_run
                 )
+            elif mode == "telegram_posts":
+                rows, sub = await _run_telegram_posts_source(
+                    client, source, extractor, supabase, city.slug, dry_run
+                )
             elif mode == "generic":
                 rows, sub = await _run_generic_source(
                     client, extractor, supabase, city.slug,
@@ -148,6 +156,7 @@ async def run_city(
         existing: list[EventRow] = []
         if not (dry_run or supabase is None):
             existing = fetch_events_by_ids(supabase, [r.id for r in all_rows])
+        extracted_by_source = Counter(r.source for r in all_rows)
         merge = merge_rows(all_rows, existing, priorities)
         all_rows = merge.rows_to_upsert
         result.merged = merge.merged
@@ -172,8 +181,29 @@ async def run_city(
             cleanup_old_events(supabase, city.slug)
             cleanup_old_raw_documents(supabase)
             record_coverage(supabase, city.slug)
+            record_source_quality(
+                supabase, city.slug, _source_quality(extracted_by_source, merge.merged_by_source)
+            )
 
     return result
+
+
+def _source_quality(
+    extracted_by_source: Counter, merged_by_source: dict[str, int]
+) -> dict[str, tuple[int, int]]:
+    """{source: (events_found, unique_events)} для record_source_quality.
+
+    unique = извлечено − проиграно кросс-источниковому merge. merged_by_source — ключи
+    вида 'loser→winner' (см. merge.py), считаем потери по источнику-проигравшему.
+    """
+    losses: Counter = Counter()
+    for key, cnt in merged_by_source.items():
+        loser = key.split("→", 1)[0]
+        losses[loser] += cnt
+    return {
+        source: (found, found - losses.get(source, 0))
+        for source, found in extracted_by_source.items()
+    }
 
 
 async def _run_per_url_source(
@@ -444,6 +474,95 @@ async def _run_vk_posts_source(
                 log.warning("vk_posts.row.invalid", title=parsed.title, error=str(exc))
 
     log.info("vk_posts.ok", source=source.name, extracted=sub.extracted)
+    sub.new = sub.extracted
+    return rows, sub
+
+
+async def _run_telegram_posts_source(
+    client: httpx.AsyncClient,
+    source: SourceConfig,
+    extractor: LLMExtractor,
+    supabase: Client | None,
+    city_slug: str,
+    dry_run: bool,
+) -> tuple[list[EventRow], PipelineResult]:
+    """Посты публичных Telegram-каналов (t.me/s/) → префильтр → LLM (1 вызов на канал).
+
+    Зеркало vk-posts. Строгость префильтра берётся из source_type канала: у агрегаторов
+    (много шума) фильтр строже, у организаторов — мягче. source_url события — ссылка на
+    канал (LLM не знает, из какого именно поста извлёк событие в batch), точная ссылка на
+    пост хранится per-post в raw_documents — там и смотрим происхождение при отладке.
+    """
+    sub = PipelineResult()
+    if not source.telegram_sources:
+        log.warning("telegram_posts.no_channels", source=source.name)
+        return [], sub
+
+    provider = TelegramHtmlProvider(client)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    rows: list[EventRow] = []
+
+    for ch in source.telegram_sources:
+        if not ch.enabled:
+            continue
+        try:
+            posts = await provider.fetch_posts(ch.channel, count=100)
+        except Exception as exc:  # noqa: BLE001
+            log.error("telegram_posts.channel.failed", channel=ch.channel, error=str(exc))
+            sub.failed += 1
+            continue
+
+        # Префильтр: свежие посты-кандидаты, ещё не обработанные (raw_documents по хешу текста).
+        candidates: list[tuple[str, str]] = []
+        for p in posts:
+            ts = p.get("date_unix")
+            if not isinstance(ts, (int, float)) or ts < now_ts - 14 * 86400:
+                continue
+            text = p.get("text") or ""
+            if not is_event_candidate(text, ch.source_type):
+                continue
+            url = p.get("url")
+            if not url:
+                continue
+            if not dry_run and supabase is not None:
+                text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                if get_raw_document_hash(supabase, url) == text_hash:
+                    continue
+            candidates.append((url, text))
+            if len(candidates) >= 20:
+                break
+
+        sub.discovered += len(candidates)
+        if not candidates:
+            continue
+
+        channel_url = f"https://t.me/{ch.channel}"
+        doc = "\n\n".join(f"=== POST {u} ===\n{t}" for u, t in candidates)
+        try:
+            parsed_events = await extractor.extract_many(doc, channel_url)
+        except ExtractorError as exc:
+            log.warning("telegram_posts.extract.skipped", channel=ch.channel, reason=str(exc))
+            sub.failed += 1
+            continue
+        except Exception as exc:  # noqa: BLE001
+            log.error("telegram_posts.extract.failed", channel=ch.channel, error=str(exc))
+            sub.failed += 1
+            continue
+
+        # Фиксируем обработанные посты (raw_documents) — следующий неизменный прогон их пропустит.
+        if not dry_run and supabase is not None:
+            for u, t in candidates:
+                save_raw_document(supabase, f"telegram:{ch.channel}", u, t, "telegram_post")
+
+        for parsed in parsed_events:
+            try:
+                rows.append(to_event_row(parsed, city_slug, channel_url, source.name))
+                sub.extracted += 1
+            except Exception as exc:  # noqa: BLE001
+                sub.failed += 1
+                log.warning("telegram_posts.row.invalid", title=parsed.title, error=str(exc))
+
+    log.info("telegram_posts.ok", source=source.name, extracted=sub.extracted)
     sub.new = sub.extracted
     return rows, sub
 

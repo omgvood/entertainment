@@ -16,13 +16,13 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import httpx
 import structlog
 
+from ..classifiers import is_event_candidate  # noqa: F401 — re-export для обратной совместимости
 from ..models import EventType, ParsedEvent
 
 
@@ -59,21 +59,6 @@ _TYPE_KEYWORDS: list[tuple[tuple[str, ...], EventType]] = [
     (("спорт", "турнир", "забег", "марафон"), "sport"),
     (("выстав",), "exhibition"),
 ]
-
-# Префильтр vk-posts: пост — кандидат на событие, только если есть дата/время ИЛИ
-# событийные маркеры ИЛИ ссылка на билеты. Отсекает рекламу/мемы/отчёты до LLM.
-_EVENT_MARKERS = (
-    "состоится", "билет", "регистраци", "вход", "начало", "когда:", "адрес:",
-    "стоимость", "афиш", "приглашаем", "пройдёт", "пройдет",
-)
-_TICKET_HOSTS = ("timepad.ru", "qtickets", "yandex.ru/afisha", "kassir", "ticketscloud")
-_DATE_RE = re.compile(
-    r"\b\d{1,2}[\s.]*(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)"
-    r"|\b\d{1,2}[./]\d{1,2}\b"  # 15.06 / 15/06
-    r"|\b\d{1,2}:\d{2}\b",      # 19:00
-    re.IGNORECASE,
-)
-
 
 class VkApiError(RuntimeError):
     """VK вернул error envelope, не подлежащий ретраю (закрытая стена/группа и т.п.)."""
@@ -249,17 +234,3 @@ def post_within_days(post: dict[str, Any], days: int, *, now_ts: Optional[float]
         return False
     now_ts = now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp()
     return ts >= now_ts - days * 86400
-
-
-def is_event_candidate(text: str) -> bool:
-    """Префильтр перед LLM: текст похож на анонс события (дата/маркеры/ссылка на билеты)."""
-    if not text:
-        return False
-    low = text.lower()
-    if _DATE_RE.search(low):
-        return True
-    if any(m in low for m in _EVENT_MARKERS):
-        return True
-    if any(h in low for h in _TICKET_HOSTS):
-        return True
-    return False

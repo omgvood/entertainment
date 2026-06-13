@@ -199,6 +199,39 @@ def record_source_health(
         log.warning("db.source_health.failed", source=source, city=city, error=str(exc))
 
 
+# --- source_quality (Analytics): ценность источника (доля уникальных событий) ---
+
+def record_source_quality(
+    client: Client, city: str, per_source: dict[str, tuple[int, int]]
+) -> None:
+    """Снимок ценности источников за сегодня.
+
+    per_source: {source_name: (events_found, unique_events)}, где unique = не проигравшие
+    кросс-источниковый merge другому источнику. Низкий ratio → источник дублирует другие.
+    """
+    try:
+        today = date.today().isoformat()
+        payload = [
+            {
+                "source": source,
+                "city": city,
+                "snapshot_date": today,
+                "events_found": found,
+                "unique_events": unique,
+                "unique_events_ratio": round(unique / found, 3) if found else None,
+            }
+            for source, (found, unique) in per_source.items()
+            if found
+        ]
+        if payload:
+            client.table("source_quality").upsert(
+                payload, on_conflict="source,city,snapshot_date"
+            ).execute()
+            log.info("db.source_quality.ok", city=city, sources=len(payload))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("db.source_quality.failed", city=city, error=str(exc))
+
+
 # --- coverage_stats (Analytics): ежедневный снимок покрытия по категориям ---
 
 def record_coverage(client: Client, city: str) -> None:
