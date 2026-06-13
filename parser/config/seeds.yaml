@@ -94,17 +94,14 @@ cities:
           - channel: afishasochi24       # афиша-агрегатор Сочи
             source_type: aggregator
             priority: 50
-          - channel: gidposochi          # гид по Сочи (дублирует VK-группу)
+          - channel: gidposochi          # гид по Сочи (дублирует VK-группу) 
             source_type: aggregator
             priority: 50
-          - channel: sochiweekend        # куда сходить в Сочи на выходных (уточнить)
+            enabled: false              # не открывается в web, переход в приложение
+          - channel: sochiweekend        # куда сходить в Сочи на выходных — проверено
             source_type: aggregator
             priority: 50
-            enabled: false              # включить после проверки t.me/s/sochiweekend
-          - channel: sochikids           # детские события Сочи (уточнить)
-            source_type: aggregator
-            priority: 50
-            enabled: false
+            enabled: true
 
       # Generic — одобренные кандидаты (длинный хвост). Включить после замера покрытия VK.
       # - name: generic
@@ -198,26 +195,21 @@ cities:
           - channel: afishaperm          # агрегатор — проверено
             source_type: aggregator
             priority: 50
+          - channel: happiness_perm             # арт-события Перми (уточнить)
+            source_type: aggregator
+            priority: 50
+            enabled: true
           # Музеи / выставки / экскурсии (покрывают пробел ❌→⚠️)
           # Проверка: открой https://t.me/s/<channel> — должны показываться посты
-          - channel: permgallery         # Пермская художественная галерея (уточнить)
+          - channel: permartmuseum         # Пермская художественная галерея
             source_type: organizer
             priority: 80
-            enabled: false              # включить после проверки t.me/s/permgallery
-          - channel: permm_museum        # PERMM (уточнить screen-name)
+            enabled: false             # не открывается в web (t.me/s/ не работает) — требует MTProto
+          - channel: permmmuseum        # PERMM (уточнить screen-name)
             source_type: organizer
             priority: 80
-            enabled: false
-          # Детские события
-          - channel: deti_perm           # детские мероприятия Перми (уточнить)
-            source_type: aggregator
-            priority: 50
-            enabled: false
+            enabled: true          
           # Мастер-классы / арт-пространства
-          - channel: permart             # арт-события Перми (уточнить)
-            source_type: aggregator
-            priority: 50
-            enabled: false
 
       # Generic — одобренные кандидаты (длинный хвост). Включить после замера покрытия VK.
       # - name: generic
