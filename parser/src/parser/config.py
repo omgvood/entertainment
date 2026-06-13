@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -36,6 +36,12 @@ class Settings:
     """Нужен если в seeds.yaml есть direct_api источники с provider=twogis."""
     timepad_token: Optional[str] = None
     """Нужен если в seeds.yaml есть direct_api источники с provider=timepad."""
+    vk_service_key: Optional[str] = None
+    """Сервисный ключ VK mini-app. Нужен для источников vk-events / vk-posts."""
+    generic_llm_budget: int = 10
+    """Макс. число LLM-вызовов на прогон в generic-источнике (защита расходов)."""
+    generic_domain_budget: int = 20
+    """Макс. число доменов на прогон в generic-источнике (защита времени прогона)."""
     llm_provider: LlmProvider = "gemini"
     gemini_model: Optional[str] = None
     """Override от env GEMINI_MODEL. Если None — DEFAULT_MODELS['gemini']."""
@@ -81,6 +87,9 @@ class Settings:
             deepseek_api_key=os.environ.get("DEEPSEEK_API_KEY"),
             twogis_api_key=os.environ.get("TWOGIS_API_KEY"),
             timepad_token=os.environ.get("TIMEPAD_TOKEN"),
+            vk_service_key=os.environ.get("VK_SERVICE_KEY"),
+            generic_llm_budget=int(os.environ.get("GENERIC_LLM_BUDGET", "10")),
+            generic_domain_budget=int(os.environ.get("GENERIC_DOMAIN_BUDGET", "20")),
             llm_provider=provider_raw,  # type: ignore[arg-type]
             gemini_model=os.environ.get("GEMINI_MODEL"),
             groq_model=os.environ.get("GROQ_MODEL"),
@@ -90,7 +99,9 @@ class Settings:
 
 
 DiscoveryKind = Literal["sitemap", "listing"]
-ExtractionMode = Literal["per_url", "batch_listing", "direct_api"]
+ExtractionMode = Literal[
+    "per_url", "batch_listing", "direct_api", "vk_events", "vk_posts", "generic"
+]
 
 
 @dataclass(frozen=True)
@@ -117,12 +128,21 @@ class SourceConfig:
     event_type: Optional[str] = None
     """Тип, который присваивается всем событиям из этого источника."""
 
+    # Для vk_events / vk_posts:
+    vk_city_id: Optional[int] = None
+    """ID города VK для groups.search (опц.; если None — поиск только по названию города)."""
+    vk_groups: list[str] = field(default_factory=list)
+    """Список screen names кураторских VK-сообществ для vk_posts."""
+
     """
     per_url:        дискавер N URL событий → N LLM-вызовов (по одному на страницу).
     batch_listing:  игнорируем дискавер, скачиваем url целиком и одним LLM-вызовом
                     извлекаем массив всех событий со страницы.
     direct_api:     вызываем API провайдера (provider + api_query) и маппим JSON → ParsedEvent
                     напрямую, без LLM. Используется для 2ГИС/Я.Карт.
+    vk_events:      VK-сообщества типа «событие» → ParsedEvent напрямую (без LLM).
+    vk_posts:       посты со стен vk_groups → префильтр → LLM extract_many (1 вызов на группу).
+    generic:        одобренные в candidate_sources домены → JSON-LD / LLM (длинный хвост).
     """
 
 
@@ -150,6 +170,8 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
                 provider=s.get("provider"),
                 api_query=s.get("api_query"),
                 event_type=s.get("event_type"),
+                vk_city_id=s.get("vk_city_id"),
+                vk_groups=s.get("vk_groups") or [],
             )
             for s in city_raw["sources"]
         ]

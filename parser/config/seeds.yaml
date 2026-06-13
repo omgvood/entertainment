@@ -7,6 +7,13 @@
 #                     требует: kind + url
 #   direct_api      — вызываем API провайдера и маппим JSON → ParsedEvent напрямую (без LLM)
 #                     требует: provider + api_query + event_type
+#   vk_events       — VK-сообщества типа «событие» → ParsedEvent напрямую (без LLM)
+#                     требует ПОЛЬЗОВАТЕЛЬСКИЙ токен (groups.search запрещён сервисному ключу) — отключён
+#   vk_posts        — посты со стен vk_groups → префильтр → LLM extract_many (1 вызов/группу)
+#                     требует: VK_SERVICE_KEY (wall.get) + vk_groups
+#   generic         — одобренные в candidate_sources домены → JSON-LD / LLM (длинный хвост)
+#
+# priority — приоритет при кросс-источниковом merge (выше = побеждает, его карточка остаётся).
 
 cities:
   sochi:
@@ -17,6 +24,7 @@ cities:
         url: https://sochi.quizplease.ru/schedule
         url_pattern: "/game-page\\?id=\\d+"
         extraction_mode: batch_listing
+        priority: 60
 
       # 2ГИС — места «всегда» (Сочи)
       - name: twogis-bowling
@@ -24,23 +32,45 @@ cities:
         provider: twogis
         api_query: "боулинг Сочи"
         event_type: bowling
+        priority: 70
 
       - name: twogis-billiards
         extraction_mode: direct_api
         provider: twogis
         api_query: "бильярд Сочи"
         event_type: billiards
+        priority: 70
 
       - name: twogis-karting
         extraction_mode: direct_api
         provider: twogis
         api_query: "картинг Сочи"
         event_type: karting
+        priority: 70
 
       # Timepad — широкая афиша: тип события определяется по его категории Timepad
       - name: timepad
         extraction_mode: direct_api
         provider: timepad
+        priority: 100
+
+      # VK — события-сообщества (структурированные start_date/place, без LLM).
+      # ОТКЛЮЧЁН: groups.search недоступен сервисному ключу mini-app (Access denied, code 15) —
+      # нужен ПОЛЬЗОВАТЕЛЬСКИЙ токен. Код (sources/vk.py) и тесты готовы: раскомментировать,
+      # если появится user-токен с правом groups.
+      # - name: vk-events
+      #   extraction_mode: vk_events
+      #   priority: 80
+      #   # vk_city_id: <проверить через database.getCities("Сочи")>
+
+      # VK — посты кураторских сообществ (свободный текст, через LLM). Работает на сервисном
+      # ключе (wall.get доступен). Screen-name'ы афиша-сообществ Сочи (без https://vk.com/).
+      - name: vk-posts
+        extraction_mode: vk_posts
+        priority: 40
+        vk_groups:
+          - afishasochi24        
+          - gidposochi       
 
       # KudaGo — пилот «широкой афиши» для Сочи. ОТКЛЮЧЁН: данные KudaGo по Сочи
       # устарели (проверено 2026-06-10) — с фильтром actual_since остаётся ~36 записей,
@@ -51,6 +81,12 @@ cities:
       #   extraction_mode: direct_api
       #   provider: kudago
       #   api_query: "sochi"
+      #   priority: 50
+
+      # Generic — одобренные кандидаты (длинный хвост). Включить после замера покрытия VK.
+      # - name: generic
+      #   extraction_mode: generic
+      #   priority: 20
 
   perm:
     sources:
@@ -60,6 +96,7 @@ cities:
         url: https://perm.quizplease.ru/schedule
         url_pattern: "/game-page\\?id=\\d+"   # используется только если --mode per_url
         extraction_mode: batch_listing
+        priority: 60
 
       # 2ГИС — места «всегда» (боулинг/бильярд/картинг)
       - name: twogis-bowling
@@ -67,23 +104,53 @@ cities:
         provider: twogis
         api_query: "боулинг Пермь"
         event_type: bowling
+        priority: 70
 
       - name: twogis-billiards
         extraction_mode: direct_api
         provider: twogis
         api_query: "бильярд Пермь"
         event_type: billiards
+        priority: 70
 
       - name: twogis-karting
         extraction_mode: direct_api
         provider: twogis
         api_query: "картинг Пермь"
         event_type: karting
+        priority: 70
 
       # Timepad — широкая афиша: тип события определяется по его категории Timepad
       - name: timepad
         extraction_mode: direct_api
         provider: timepad
+        priority: 100
+
+      # VK — события-сообщества (структурированные start_date/place, без LLM).
+      # ОТКЛЮЧЁН: groups.search недоступен сервисному ключу mini-app (Access denied, code 15) —
+      # нужен ПОЛЬЗОВАТЕЛЬСКИЙ токен. Код (sources/vk.py) и тесты готовы: раскомментировать,
+      # если появится user-токен с правом groups.
+      # - name: vk-events
+      #   extraction_mode: vk_events
+      #   priority: 80
+      #   # vk_city_id: <проверить через database.getCities("Пермь")>
+
+      # VK — посты кураторских сообществ (свободный текст, через LLM). Работает на сервисном
+      # ключе (wall.get доступен). Screen-name'ы афиша-сообществ Перми (без https://vk.com/).
+      - name: vk-posts
+        extraction_mode: vk_posts
+        priority: 40
+        vk_groups:
+          - permactive         # активный досуг Перми (подсказка seeds)
+          - kudaperm            # куда пойти в Перми
+          - prmgo
+          - perm_where_to_go
+          - permkudapoiti
+
+      # Generic — одобренные кандидаты (длинный хвост). Включить после замера покрытия VK.
+      # - name: generic
+      #   extraction_mode: generic
+      #   priority: 20
 
       # DeepSeek тестовый источник (раскомментировать для локального тестирования)
       # - name: quizplease-deepseek-test
@@ -91,3 +158,4 @@ cities:
       #   url: https://perm.quizplease.ru/schedule
       #   extraction_mode: batch_listing
       #   provider: deepseek
+      #   priority: 0

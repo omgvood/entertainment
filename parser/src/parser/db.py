@@ -51,6 +51,26 @@ def upsert_events(client: Client, events: list[EventRow]) -> WriteStats:
     return stats
 
 
+def fetch_events_by_ids(client: Client, ids: list[str]) -> list[EventRow]:
+    """Существующие события с указанными id (для кросс-источникового merge).
+
+    id = city+slug, поэтому уже включает город. Возвращает распарсенные EventRow.
+    """
+    if not ids:
+        return []
+    rows: list[EventRow] = []
+    unique = list({i for i in ids if i})
+    for i in range(0, len(unique), 100):
+        chunk = unique[i : i + 100]
+        resp = client.table("events").select("*").in_("id", chunk).execute()
+        for r in resp.data or []:
+            try:
+                rows.append(EventRow(**r))
+            except Exception as exc:  # noqa: BLE001 — битую строку из БД просто пропускаем
+                log.warning("db.fetch_ids.row_invalid", id=r.get("id"), error=str(exc))
+    return rows
+
+
 def cleanup_old_events(client: Client, city: str, days_to_keep: int = 7) -> int:
     """Удаляет события с истёкшей датой (не 'always') старше days_to_keep дней.
 

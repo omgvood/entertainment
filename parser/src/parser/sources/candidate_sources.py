@@ -204,6 +204,7 @@ def save_candidates(client: Client, candidates: list[Candidate]) -> int:
             "domain": cand.domain,
             "city": cand.city,
             "queries": sorted(merged_queries),
+            "sample_urls": cand.sample_urls,
             "score": cand.score,
             "has_jsonld_event": cand.has_jsonld_event,
             "last_seen": now,

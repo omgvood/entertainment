@@ -14,9 +14,13 @@ GitHub Actions (cron, 00:00 МСК)
     ▼
 Python-парсер (parser/)
     ├── direct_api: 2ГИС / Timepad → ParsedEvent (без LLM)
+    ├── vk_posts: посты VK-сообществ → префильтр → LLM (1 вызов/группу)  [сервисный ключ]
+    ├── vk_events: события-сообщества → ParsedEvent без LLM  [отключён: нужен user-токен]
+    ├── generic: одобренные candidate_sources → JSON-LD / LLM (длинный хвост)
     ├── Discovery: краулер HTML / sitemap (для listing-источников)
     ├── Extraction: JSON-LD (Schema.org) → фолбэк LLM (Gemini / Groq / DeepSeek)
     ├── Dedup: новые URL + хеш листинга (raw_documents) — экономия LLM
+    ├── Merge: кросс-источниковое слияние по id с учётом priority
     ├── Validation: slug, типы, даты
     └── DB Write: upsert в Supabase Postgres
     │
@@ -36,9 +40,10 @@ Vercel CDN ← пользователь
 
 | Подсистема | Что входит | Назначение |
 |-----------|-----------|-----------|
-| **Discovery** | `candidate_sources` | Поиск новых источников → ручная модерация → `seeds.yaml` |
-| **Ingestion** | crawlers + API-клиенты + `raw_documents` | Получение и хранение сырого контента |
+| **Discovery** | `candidate_sources` | Поиск новых источников → модерация → `seeds.yaml` или **generic-парсер** (одобренные домены парсятся без ручного кода) |
+| **Ingestion** | crawlers + API-клиенты (2ГИС/Timepad/VK) + `raw_documents` | Получение и хранение сырого контента |
 | **Extraction** | JSON-LD / LLM / теги | Превращение сырья в `ParsedEvent` |
+| **Merge** | `merge.py` + `SourceConfig.priority` | Кросс-источниковое слияние дублей по `id` с обогащением полей |
 | **Analytics** | `source_health` + `coverage_stats` | Мониторинг здоровья источников и полноты покрытия |
 
 ---
@@ -96,12 +101,14 @@ Vercel CDN ← пользователь
 | Возможность | Что даёт | Где |
 |-------------|----------|-----|
 | **Теги** (`tags` + `tags_version`) | Основа подборок/рекомендаций. Закрытый набор, версионируемый. LLM выбирает из набора, direct_api получает авто-теги по типу | `taxonomy.py`, `models.py`, промпты экстракторов |
-| **Discovery источников** | Поиск новых сайтов → скоринг → `candidate_sources` → ручная модерация → `seeds.yaml` | `sources/candidate_sources.py`, команда `discover-sources` |
+| **VK-источники** | `vk-posts` (посты кураторских сообществ + префильтр + LLM, 1 вызов/группу) — работает на сервисном ключе. `vk-events` (события-сообщества без LLM) готов, но отключён: `groups.search` требует user-токен | `sources/vk.py`, режимы `vk_posts`/`vk_events` |
+| **Generic-парсер** | Одобренные в `candidate_sources` домены парсятся автоматически (JSON-LD → LLM в пределах бюджета) — замыкает цикл Discovery → Ingestion | `sources/generic.py`, режим `generic` |
+| **Discovery источников** | Поиск новых сайтов → скоринг → `candidate_sources` → модерация → `seeds.yaml` или generic | `sources/candidate_sources.py`, команда `discover-sources` |
+| **Cross-source merge** | Слияние дублей одного события из разных источников по `id` с учётом `priority` и обогащением пустых полей | `merge.py`, `pipeline.py` |
 | **Raw Documents** | Хранение сырья (HTML/JSON) для перепарса без повторного краулинга; здесь же хеш для дедупа | `db.py` (`save_raw_document`), таблица `raw_documents` |
 | **Source Health** | Лог + агрегат по источникам: `events_found`, `errors`, `duration_sec`, `success_rate` | `db.py` (`record_source_health`), таблицы `source_health*` |
 | **Coverage Stats** | Ежедневный снимок покрытия по категориям — видно тренды и выпадение категорий | `db.py` (`record_coverage`), таблица `coverage_stats` |
-| **Fingerprint** | Кросс-источниковая дедупликация по `title+date+venue` (без UNIQUE — пока статистика) | `validator.py` (`_fingerprint`), поле `events.fingerprint` |
-| **Source priority** | Приоритет источника для разрешения дублей | `config.py` (`SourceConfig.priority`) |
+| **Source priority** | Приоритет источника для разрешения дублей в merge | `config.py` (`SourceConfig.priority`) |
 
 Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
 
@@ -119,7 +126,8 @@ entertainment/
 │   │   ├── config.py               — Settings + SourceConfig (с priority) + загрузка seeds
 │   │   ├── models.py               — ParsedEvent, EventRow (Pydantic) + tags/fingerprint
 │   │   ├── taxonomy.py             — закрытый набор тегов + TAGS_VERSION + авто-теги
-│   │   ├── pipeline.py             — оркестратор пайплайна + health/coverage/dedup
+│   │   ├── pipeline.py             — оркестратор пайплайна + health/coverage/merge
+│   │   ├── merge.py                — кросс-источниковое слияние дублей по id (priority)
 │   │   ├── db.py                   — upsert + cleanup + raw_documents/health/coverage
 │   │   ├── dedup.py                — фильтрация известных URL (per_url)
 │   │   ├── validator.py            — конвертация в EventRow + slug + fingerprint
@@ -137,6 +145,8 @@ entertainment/
 │   │       ├── twogis.py           — 2ГИС Catalog API (без LLM)
 │   │       ├── timepad.py          — Timepad API, широкая афиша; тип по категории (без LLM)
 │   │       ├── kudago.py           — KudaGo API, широкая афиша (без LLM; Сочи-пилот, отключён)
+│   │       ├── vk.py               — VK API: события-сообщества (без LLM) + посты (LLM)
+│   │       ├── generic.py          — generic-парсер одобренных candidate_sources (JSON-LD/LLM)
 │   │       └── candidate_sources.py — Discovery новых источников (поиск → скоринг → БД)
 │   ├── tests/                      — pytest тесты
 │   ├── pyproject.toml              — зависимости и настройки пакета
@@ -202,7 +212,7 @@ entertainment/
 | `--source NAME` | Запустить только один источник (опционально) |
 | `--dry-run` | LLM работает, но в БД не пишет. Для проверки качества извлечения |
 | `--provider gemini\|groq\|deepseek` | Переключить LLM-провайдер разово |
-| `--mode per_url\|batch_listing\|direct_api` | Переопределить режим извлечения |
+| `--mode per_url\|batch_listing\|direct_api\|vk_events\|vk_posts\|generic` | Переопределить режим извлечения |
 
 Возвращает код выхода 0 если хотя бы половина событий извлечена успешно, иначе 1.
 
@@ -216,15 +226,18 @@ entertainment/
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 - `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`
 - `TWOGIS_API_KEY`, `TIMEPAD_TOKEN`
+- `VK_SERVICE_KEY` — сервисный ключ VK mini-app (для источников `vk-events`/`vk-posts`)
+- `GENERIC_LLM_BUDGET` (дефолт 10), `GENERIC_DOMAIN_BUDGET` (дефолт 20) — лимиты generic-парсера
 - `LLM_PROVIDER` (gemini / groq / deepseek, дефолт: gemini)
 - `GEMINI_MODEL`, `GROQ_MODEL`, `DEEPSEEK_MODEL` — модели провайдеров
 
 **`SourceConfig`** — конфигурация одного источника из `seeds.yaml`:
 - `name` — уникальное имя источника
-- `extraction_mode` — `per_url` / `batch_listing` / `direct_api`
-- `priority` — приоритет источника при кросс-источниковой дедупликации (выше — побеждает), дефолт `0`
+- `extraction_mode` — `per_url` / `batch_listing` / `direct_api` / `vk_events` / `vk_posts` / `generic`
+- `priority` — приоритет источника при кросс-источниковом merge (выше — побеждает), дефолт `0`
 - Для `per_url`/`batch_listing`: `kind` (listing/sitemap), `url`, `url_pattern` (regex)
 - Для `direct_api`: `provider` (`twogis` / `timepad` / `kudago`). `twogis` требует `api_query` + `event_type`; `timepad`/`kudago` тип определяют сами по категории (доп. полей не нужно)
+- Для `vk_events`: опц. `vk_city_id` (ID города VK для `groups.search`). Для `vk_posts`: `vk_groups` — список screen-name'ов кураторских сообществ
 
 **`CityConfig`** — список источников одного города.
 
@@ -257,6 +270,9 @@ cities:
 - `batch_listing` — скачивает страницу целиком. Сначала пробует Schema.org JSON-LD (бесплатно, без LLM); если не нашёл — один LLM-вызов извлекает все события. Пропускается целиком, если HTML не менялся (хеш в `raw_documents`)
 - `per_url` — дискавери находит N URL, затем N отдельных LLM-вызовов для каждого
 - `direct_api` — вызов внешнего API (2ГИС / Timepad / KudaGo), маппинг JSON → `ParsedEvent` без LLM
+- `vk_events` — VK-сообщества типа «событие» (нативные `start_date`/`place`) → `ParsedEvent` без LLM
+- `vk_posts` — посты со стен `vk_groups`: префильтр (дата/маркеры/билеты) → один `extract_many` на группу
+- `generic` — одобренные в `candidate_sources` домены: JSON-LD, иначе LLM в пределах бюджета (длинный хвост)
 
 ---
 
@@ -320,12 +336,14 @@ LLM-экстракторы получают список разрешённых 
 
 Главная функция, запускается из CLI для каждого города:
 1. Перебирает источники из `CityConfig`, замеряя длительность каждого
-2. Для каждого вызывает нужный runner (`_run_per_url_source`, `_run_batch_source`, `_run_direct_api_source`)
+2. Для каждого вызывает нужный runner (`_run_per_url_source`, `_run_batch_source`, `_run_direct_api_source`, `_run_vk_events_source`, `_run_vk_posts_source`, `_run_generic_source`)
 3. Пишет здоровье источника в `source_health` (`record_source_health`)
-4. Дедупликация по `id` + подсчёт `duplicate_candidates` по `fingerprint` (без схлопывания)
-5. Upsert в БД
+4. **Cross-source merge** (`merge.merge_rows`): группирует строки по `id` (= city+slug), выбирает победителя по `priority`, обогащает его пустые поля из проигравших; в боевом режиме подмешивает существующие строки из БД (`fetch_events_by_ids`), чтобы не даунгрейдить карточку источником с меньшим приоритетом
+5. Upsert в БД (слияние делит `id` → upsert по slug перезаписывает на месте, удалений не нужно)
 6. Очистка: `cleanup_old_events` + `cleanup_old_raw_documents` (TTL) + снимок `record_coverage`
-7. Возвращает `PipelineResult` (discovered / new / extracted / failed / written / duplicate_candidates)
+7. Возвращает `PipelineResult` (discovered / new / extracted / failed / written / **merged** / **near_misses** / **merged_by_source**)
+
+> **`merged_by_source`** (разбивка «источник-проигравший → победитель») — KPI для оценки реальной ценности нового источника: видно, сколько событий VK уникальны, а сколько дублируют Timepad. **`near_misses`** (та же площадка+дата, разные названия) — сигнал-кандидат для будущего fuzzy-матчинга, пока только логируется.
 
 **`_run_per_url_source(source, extractor, client, dry_run)`**
 - Discovery (listing или sitemap) → список URL
@@ -358,6 +376,9 @@ LLM-экстракторы получают список разрешённых 
 - Удаляет события: `date < сегодня - 7 дней AND date != 'always'`
 - Сохраняет: постоянные места (`always`) и события ближайших 7 дней (буфер на случай отмены парсинга)
 - Вызывается автоматически после каждого прогона
+
+**Merge (`fetch_events_by_ids`):**
+- `fetch_events_by_ids(client, ids)` — существующие события по `id` (чанками по 100) → `EventRow`; используется кросс-источниковым merge, чтобы обогащать/не даунгрейдить карточки прошлых прогонов
 
 **Ingestion (`raw_documents`):**
 - `save_raw_document(client, source, url, content, content_type, content_hash)` — upsert сырья по `url`
@@ -400,8 +421,7 @@ LLM-экстракторы получают список разрешённых 
 **`_fingerprint(title, date, venue)` / `_normalize(s)`**
 - `_normalize` приводит строку к канону: нижний регистр, `ё→е`, без пунктуации, схлопнутые пробелы
 - `_fingerprint` = `sha256(normalize(title)|date|normalize(venue))[:16]`
-- Одно и то же событие из разных источников даёт одинаковый fingerprint → кросс-источниковый дедуп
-- **Без UNIQUE** намеренно: сначала собираем статистику (`duplicate_candidates`), constraint позже
+- Кросс-источниковый дедуп фактически выполняется по **`id`** (= `city`+`slug`, а `slug` детерминирован из `title`+`date`) в `merge.py` — это публичный ключ карточки, и БД держит одну строку на `slug`. Поле `fingerprint` хранится как вспомогательный сигнал (тоньше `id`: учитывает площадку) для возможной будущей аналитики; **без UNIQUE**.
 
 **`_make_slug(title, date)`**
 - Кириллица → транслитерация (встроенный словарь: я→ya, ж→zh, ш→sh и т.д.)
@@ -410,6 +430,56 @@ LLM-экстракторы получают список разрешённых 
 - Обрезка до 80 символов
 - Суффикс даты: `kviz-v-bare-2026-06-01`
 - Для `date='always'` дата не добавляется: `bowling-plus`
+
+---
+
+### `merge.py` — кросс-источниковое слияние
+
+Одно событие может прийти из Timepad, VK и сайта организатора. `merge_rows(incoming, existing, priorities)`
+схлопывает дубли **по `id`** (= `city`+`slug`, а `slug` детерминирован из `title`+`date`, поэтому
+строки одного события обязаны иметь один `id`, и БД всё равно держит одну строку на `slug`).
+
+- **Победитель** — источник с наибольшим `priority`; при равенстве выигрывает свежая строка прогона (incoming), а не БД.
+- **Обогащение** — пустые поля победителя (`time_start`, `image_url`, `description`, `organizer`, `district`, цена, теги) добираются из проигравших. Итог — карточка лучше любого отдельного источника.
+- **Без удалений** — все слитые строки делят `id`, upsert по `slug` перезаписывает на месте.
+- **Чистые функции** — без обращения к БД, тестируются изолированно (`tests/test_merge.py`).
+- **Fuzzy-матчинг отложен** — нормализация уже ловит регистр/пунктуацию/ё; разные названия одного события (`near_misses`) пока только считаются, не схлопываются.
+
+Приоритеты в `seeds.yaml`: `timepad` 100, `vk-events` 80, `twogis-*` 70, `quizplease` 60, `vk-posts` 40, `generic` 20.
+
+---
+
+### `sources/vk.py` — VK API
+
+**`VkClient`** — клиент VK (`api.vk.com/method`, сервисный ключ mini-app, `VK_SERVICE_KEY`). Сервисному
+ключу доступны только методы открытых данных (`groups.search`, `groups.getById`, `wall.get`);
+`newsfeed.search` недоступен — на нём ничего не строим. Троттлинг ~3 rps, обработка error envelope
+(код 6 → ретрай, 15/30 → пропуск закрытой группы).
+
+Два режима:
+- **`vk_events`** — `search_event_groups(city)`: VK-сообщества типа «событие» имеют нативные
+  `start_date`/`finish_date`/`place` → `event_group_to_parsed()` маппит напрямую, **без LLM**.
+  ⚠️ **Отключён в seeds**: `groups.search` запрещён сервисному ключу (Access denied, code 15) —
+  нужен пользовательский токен. Код и тесты готовы, ждут user-токена.
+- **`vk_posts`** — `fetch_wall_posts(group)`: посты со стен `vk_groups`. **Работает на сервисном
+  ключе** (`wall.get` доступен; закрытые группы пропускаются по `VkApiError`). Перед LLM — **префильтр**
+  `is_event_candidate()` (есть дата/время, маркеры «билеты»/«регистрация»/«вход», ссылка на Timepad)
+  и фильтр свежести 14 дней; дедуп постов через `raw_documents` (хеш текста). Посты-кандидаты
+  (≤20/группу) склеиваются в один документ → **один** `extract_many` на группу (экономия токенов).
+
+### `sources/generic.py` — generic-парсер кандидатов
+
+Замыкает цикл **Discovery → Ingestion**: одобренные в `candidate_sources` (`status='approved'`) домены
+парсятся без ручного кода под каждый сайт.
+
+- **`load_approved_domains`** — домены города по убыванию `score`, не больше `GENERIC_DOMAIN_BUDGET` (защита времени прогона).
+- **`resolve_listing_url`** — URL листинга: кэш `listing_url` (если `last_verified` свежее 30 дней) → `sample_urls` с event-path-хинтом → пробинг `/afisha` `/events` `/raspisanie` `/schedule`. Результат кэшируется обратно.
+- **Извлечение** — сначала JSON-LD (бесплатно, хватает доменам с `has_jsonld_event`), иначе `extract_many` в пределах `GENERIC_LLM_BUDGET` LLM-вызовов на прогон; hash-дедуп листинга через `raw_documents`.
+- **Health per-domain** — `source='generic:{domain}'`; хронически падающий домен демотируется вручную (`status='broken'`) по данным `source_health_agg`.
+
+> ⚠️ Generic — инструмент **«длинного хвоста»** статических сайтов. SPA/JS-рендеринг и анти-бот
+> сайты он не возьмёт — такие при необходимости получают специализированный источник. Включать
+> после замера покрытия VK (ядро Timepad+VK+QuizPlease+2ГИС может уже давать ~80% Перми).
 
 ---
 
@@ -586,6 +656,7 @@ LLM-экстракторы получают список разрешённых 
 | `GEMINI_API_KEY` | Google Gemini API |
 | `TWOGIS_API_KEY` | 2ГИС Catalog API |
 | `TIMEPAD_TOKEN` | Timepad API (Bearer-токен) для direct_api источников |
+| `VK_SERVICE_KEY` | Сервисный ключ VK mini-app для `vk-events`/`vk-posts` |
 | `VERCEL_DEPLOY_HOOK` | URL хука деплоя Vercel |
 | `TG_BOT_TOKEN` | Telegram-бот для алертов (опционально) |
 | `TG_CHAT_ID` | chat_id для алертов (опционально) |
@@ -748,10 +819,16 @@ Postgres TOAST (колонка `text`), TTL — 90–180 дней.
 | `domain` | text PK | Домен кандидата |
 | `city` | text | Город |
 | `queries` | text[] | Поисковые запросы, в которых встретился |
+| `sample_urls` | text[] | Примеры найденных URL (для выбора страницы-листинга в generic) |
 | `score` | int | Рейтинг полезности (JSON-LD Event, путь `/events`, частота) |
 | `has_jsonld_event` | bool | Найден ли Schema.org Event |
-| `status` | text | `new` / `approved` / `rejected` |
+| `status` | text | `new` / `approved` / `rejected` / `broken` |
+| `listing_url` | text | Кэш страницы-листинга для generic-парсера |
+| `last_verified` | timestamptz | Когда `listing_url` последний раз проверялся (TTL 30 дней) |
 | `found_at` / `last_seen` | timestamptz | Первая и последняя находка |
+
+**Жизненный цикл:** `new` (ждёт модерации) → `approved` (generic-парсер забирает домен) →
+при хронических падениях вручную `broken` (по данным `source_health_agg`); `rejected` — пропустить навсегда.
 
 ### Таблицы `source_health` / `source_health_agg` (Analytics) — здоровье источников
 
@@ -769,6 +846,16 @@ Postgres TOAST (колонка `text`), TTL — 90–180 дней.
 Когда карточек станет 1000+, площадки выносятся в отдельную таблицу `venues`
 (`id, name, address, district, city`), а `events.venue_id` ссылается на неё —
 для страниц площадок, SEO и рекомендаций.
+
+### Future (зафиксировано, не реализовано)
+
+- **Event provenance** — таблица `event_sources (event_id, source)`: видеть, из каких источников
+  собрано событие и кто победил в merge. Сейчас merge просто оставляет победителя; provenance нужен,
+  когда отладка качества данных станет узким местом.
+- **candidate_sources → Source Registry** — таблица уже накапливает `score`/`sample_urls`/`listing_url`/
+  `last_verified`/`status` и дрейфует в сторону реестра источников; возможна будущая консолидация с `seeds.yaml`.
+- **Дедуп v2** — per-field priority, freshness weighting (VK свежее знает о переносе/отмене),
+  fuzzy-матчинг по накопленным `near_misses`.
 
 ---
 
@@ -795,6 +882,9 @@ SUPABASE_SERVICE_ROLE_KEY=...
 GEMINI_API_KEY=...
 TWOGIS_API_KEY=...
 TIMEPAD_TOKEN=...
+VK_SERVICE_KEY=...           # сервисный ключ VK mini-app (vk-events / vk-posts)
+GENERIC_LLM_BUDGET=10        # макс. LLM-вызовов/прогон в generic (опц.)
+GENERIC_DOMAIN_BUDGET=20     # макс. доменов/прогон в generic (опц.)
 LLM_PROVIDER=gemini   # gemini | groq | deepseek
 ```
 
@@ -828,7 +918,7 @@ python -m parser.cli discover-sources --city perm --dry-run  # только вы
 | `run --city <c> --dry-run` | Прогон LLM без записи (проверка качества) | нет |
 | `run --city <c> --source <s>` | Один источник | да |
 | `run … --provider gemini\|groq\|deepseek` | Override LLM-провайдера | да |
-| `run … --mode per_url\|batch_listing\|direct_api` | Override режима | да |
+| `run … --mode per_url\|batch_listing\|direct_api\|vk_events\|vk_posts\|generic` | Override режима | да |
 | `discover-sources --city <c>` | Поиск новых источников → `candidate_sources` | да |
 | `discover-sources --city <c> --dry-run` | Поиск без записи (только вывод) | нет |
 
