@@ -205,10 +205,10 @@ cities:
             source_type: organizer
             priority: 80
             enabled: true
-          - channel: permmmuseum        # PERMM (уточнить screen-name)
+          - channel: permmmuseum        # PERMM — проверено
             source_type: organizer
             priority: 80
-            enabled: true          
+            enabled: true
           # Мастер-классы / арт-пространства
 
       # Generic — одобренные кандидаты (длинный хвост). Включить после замера покрытия VK.
