@@ -168,12 +168,12 @@ cities:
           - perm_where_to_go
           - permkudapoiti
           # Организаторы — выставки / экскурсии (покрывают пробел ❌→⚠️)
-          - permgallery        # Пермская государственная художественная галерея
-          - permm              # PERMM — музей современного искусства
+          - permartmuseum        # Пермская государственная художественная галерея
+          - permm_museum              # PERMM — музей современного искусства
           # Организаторы — детские события
-          - kuklateatrperm     # Пермский театр кукол
+          - dollpermmuseum     # Пермский театр кукол
           # Организаторы — мастер-классы / арт
-          - artspaceperm       # арт-пространства Перми (уточнить screen-name через vk.com/search)
+          - artspaceperm       # арт-пространства Перми 
 
       # Telegram — посты публичных каналов (веб-превью t.me/s/, без авторизации).
       # source_type влияет на строгость префильтра: organizer (мало шума) — мягче,
@@ -201,10 +201,10 @@ cities:
             enabled: true
           # Музеи / выставки / экскурсии (покрывают пробел ❌→⚠️)
           # Проверка: открой https://t.me/s/<channel> — должны показываться посты
-          - channel: permartmuseum         # Пермская художественная галерея
+          - channel: permartmuseum         # Пермская художественная галерея — проверено
             source_type: organizer
             priority: 80
-            enabled: false             # не открывается в web (t.me/s/ не работает) — требует MTProto
+            enabled: true
           - channel: permmmuseum        # PERMM (уточнить screen-name)
             source_type: organizer
             priority: 80
