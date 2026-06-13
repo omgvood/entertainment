@@ -40,6 +40,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TWOGIS_API_KEY: ${{ secrets.TWOGIS_API_KEY }}
           TIMEPAD_TOKEN: ${{ secrets.TIMEPAD_TOKEN }}
+          VK_SERVICE_KEY: ${{ secrets.VK_SERVICE_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python -m parser.cli run --city ${{ matrix.city }}

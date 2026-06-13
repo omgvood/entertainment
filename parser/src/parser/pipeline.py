@@ -18,6 +18,7 @@ from .db import (
     WriteStats,
     cleanup_old_events,
     cleanup_old_raw_documents,
+    fetch_events_by_ids,
     get_raw_document_hash,
     record_coverage,
     record_source_health,
@@ -27,8 +28,11 @@ from .db import (
 from .dedup import filter_new_urls
 from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
+from .merge import merge_rows
 from .models import EventRow, EventType, ParsedEvent
-from .sources import KudaGoClient, TimepadClient, TwoGisClient
+from .sources import KudaGoClient, TimepadClient, TwoGisClient, VkClient
+from .sources import vk as vk_mod
+from .sources.generic import run_generic
 from .validator import to_event_row
 
 
@@ -43,6 +47,13 @@ class PipelineResult:
     failed: int = 0
     written: int = 0
     duplicate_candidates: int = 0
+    merged: int = 0
+    near_misses: int = 0
+    merged_by_source: dict = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.merged_by_source is None:
+            self.merged_by_source = {}
 
 
 def _make_discovery(client: httpx.AsyncClient, source: SourceConfig):
@@ -64,6 +75,9 @@ async def run_city(
     only_source: str | None = None,
     twogis_api_key: str | None = None,
     timepad_token: str | None = None,
+    vk_service_key: str | None = None,
+    generic_llm_budget: int = 10,
+    generic_domain_budget: int = 20,
     mode_override: str | None = None,
 ) -> PipelineResult:
     """Полный прогон по одному городу. supabase=None при --dry-run.
@@ -73,6 +87,7 @@ async def run_city(
     """
     result = PipelineResult()
     provider_keys = {"twogis": twogis_api_key, "timepad": timepad_token}
+    priorities = {s.name: s.priority for s in city.sources}
 
     async with httpx.AsyncClient(
         headers={"User-Agent": "EventsBot/1.0 (pet-project)"}
@@ -91,6 +106,19 @@ async def run_city(
             elif mode == "direct_api":
                 rows, sub = await _run_direct_api_source(
                     client, source, city.slug, provider_keys
+                )
+            elif mode == "vk_events":
+                rows, sub = await _run_vk_events_source(
+                    client, source, city.slug, vk_service_key
+                )
+            elif mode == "vk_posts":
+                rows, sub = await _run_vk_posts_source(
+                    client, source, extractor, supabase, city.slug, vk_service_key, dry_run
+                )
+            elif mode == "generic":
+                rows, sub = await _run_generic_source(
+                    client, extractor, supabase, city.slug,
+                    generic_llm_budget, generic_domain_budget,
                 )
             else:
                 rows, sub = await _run_per_url_source(
@@ -113,38 +141,29 @@ async def run_city(
                     duration_sec=duration,
                 )
 
-        # 4. Дедуп по id — если два источника (или два item'а 2ГИС) дали одинаковый
-        # slug, Postgres не сможет upsert-нуть их в одном batch. Оставляем последний.
-        deduped: dict[str, EventRow] = {}
-        collisions = 0
-        for r in all_rows:
-            if r.id in deduped:
-                collisions += 1
-                log.warning(
-                    "dedup.collision",
-                    id=r.id,
-                    kept_title=deduped[r.id].title,
-                    skipped_title=r.title,
-                )
-            deduped[r.id] = r
-        all_rows = list(deduped.values())
-        if collisions:
-            log.info("dedup.summary", collisions=collisions, final_count=len(all_rows))
-
-        # 4b. Кросс-источниковые кандидаты на дубль: одинаковый fingerprint (title+date+venue),
-        # но разный slug/источник. НЕ схлопываем (constraint вводим позже) — только считаем.
-        fp_groups: dict[str, int] = {}
-        for r in all_rows:
-            if r.fingerprint:
-                fp_groups[r.fingerprint] = fp_groups.get(r.fingerprint, 0) + 1
-        result.duplicate_candidates = sum(n - 1 for n in fp_groups.values() if n > 1)
-        if result.duplicate_candidates:
+        # 4. Кросс-источниковый merge по id (= city+slug). Несколько источников с одинаковым
+        # title+date дают одинаковый id — схлопываем в победителя по priority, обогащая его
+        # пустые поля из проигравших. existing из БД участвуют, чтобы (а) сохранять данные
+        # прошлых прогонов и (б) не даунгрейдить карточку источником с меньшим priority.
+        existing: list[EventRow] = []
+        if not (dry_run or supabase is None):
+            existing = fetch_events_by_ids(supabase, [r.id for r in all_rows])
+        merge = merge_rows(all_rows, existing, priorities)
+        all_rows = merge.rows_to_upsert
+        result.merged = merge.merged
+        result.near_misses = merge.near_misses
+        result.merged_by_source = merge.merged_by_source
+        result.duplicate_candidates = merge.merged  # обратная совместимость поля
+        if merge.merged or merge.near_misses:
             log.info(
-                "dedup.fingerprint_candidates",
-                duplicate_candidates=result.duplicate_candidates,
+                "dedup.merge",
+                merged=merge.merged,
+                near_misses=merge.near_misses,
+                by_source=merge.merged_by_source,
             )
 
-        # 5. Write
+        # 5. Write. Слияние делит id, поэтому upsert по slug перезаписывает карточку на месте —
+        # отдельных удалений не требуется.
         if dry_run or supabase is None:
             log.info("write.skipped", reason="dry-run", would_write=len(all_rows))
         else:
@@ -299,6 +318,155 @@ async def _fetch_direct_api_items(
         return await KudaGoClient(client).search(source.api_query or city_slug)
 
     return None
+
+
+async def _run_vk_events_source(
+    client: httpx.AsyncClient,
+    source: SourceConfig,
+    city_slug: str,
+    vk_service_key: str | None,
+) -> tuple[list[EventRow], PipelineResult]:
+    """VK-сообщества типа «событие» → ParsedEvent напрямую, без LLM."""
+    sub = PipelineResult()
+    if not vk_service_key:
+        log.error("vk_events.config", source=source.name, reason="нет VK_SERVICE_KEY")
+        sub.failed = 1
+        return [], sub
+
+    city_name = vk_mod.CITY_NAMES.get(city_slug, city_slug)
+    try:
+        groups = await VkClient(client, vk_service_key).search_event_groups(
+            city_name, city_id=source.vk_city_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error("vk_events.failed", source=source.name, error=str(exc))
+        sub.failed = 1
+        return [], sub
+
+    rows: list[EventRow] = []
+    for g in groups:
+        parsed = vk_mod.event_group_to_parsed(g, city_name)
+        if parsed is None:
+            continue
+        try:
+            rows.append(
+                to_event_row(parsed, city_slug, vk_mod.event_group_url(g), source.name)
+            )
+            sub.extracted += 1
+        except Exception as exc:  # noqa: BLE001
+            sub.failed += 1
+            log.warning("vk_events.row.invalid", title=parsed.title, error=str(exc))
+
+    log.info("vk_events.ok", source=source.name, groups=len(groups), extracted=sub.extracted)
+    sub.discovered = len(groups)
+    sub.new = sub.extracted
+    return rows, sub
+
+
+async def _run_vk_posts_source(
+    client: httpx.AsyncClient,
+    source: SourceConfig,
+    extractor: LLMExtractor,
+    supabase: Client | None,
+    city_slug: str,
+    vk_service_key: str | None,
+    dry_run: bool,
+) -> tuple[list[EventRow], PipelineResult]:
+    """Посты со стен кураторских VK-сообществ → префильтр → LLM (1 вызов на сообщество)."""
+    sub = PipelineResult()
+    if not vk_service_key:
+        log.error("vk_posts.config", source=source.name, reason="нет VK_SERVICE_KEY")
+        sub.failed = 1
+        return [], sub
+    if not source.vk_groups:
+        log.warning("vk_posts.no_groups", source=source.name)
+        return [], sub
+
+    vk = VkClient(client, vk_service_key)
+    rows: list[EventRow] = []
+
+    for screen in source.vk_groups:
+        try:
+            posts = await vk.fetch_wall_posts(screen, count=100)
+        except vk_mod.VkApiError as exc:
+            log.warning("vk_posts.group.skipped", group=screen, reason=str(exc))
+            continue
+        except Exception as exc:  # noqa: BLE001
+            log.error("vk_posts.group.failed", group=screen, error=str(exc))
+            sub.failed += 1
+            continue
+
+        # Префильтр: свежие посты-кандидаты, ещё не обработанные (raw_documents по хешу текста).
+        candidates: list[tuple[str, str]] = []
+        for p in posts:
+            if not vk_mod.post_within_days(p, 14):
+                continue
+            text = p.get("text") or ""
+            if not vk_mod.is_event_candidate(text):
+                continue
+            url = vk_mod.post_url(p.get("owner_id"), p.get("id"))
+            if not dry_run and supabase is not None:
+                text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                if get_raw_document_hash(supabase, url) == text_hash:
+                    continue
+            candidates.append((url, text))
+            if len(candidates) >= 20:
+                break
+
+        sub.discovered += len(candidates)
+        if not candidates:
+            continue
+
+        group_url = f"https://vk.com/{screen}"
+        doc = "\n\n".join(f"=== POST {u} ===\n{t}" for u, t in candidates)
+        try:
+            parsed_events = await extractor.extract_many(doc, group_url)
+        except ExtractorError as exc:
+            log.warning("vk_posts.extract.skipped", group=screen, reason=str(exc))
+            sub.failed += 1
+            continue
+        except Exception as exc:  # noqa: BLE001
+            log.error("vk_posts.extract.failed", group=screen, error=str(exc))
+            sub.failed += 1
+            continue
+
+        # Фиксируем обработанные посты (raw_documents) — следующий неизменный прогон их пропустит.
+        if not dry_run and supabase is not None:
+            for u, t in candidates:
+                save_raw_document(supabase, source.name, u, t, "vk_post")
+
+        for parsed in parsed_events:
+            try:
+                rows.append(to_event_row(parsed, city_slug, group_url, source.name))
+                sub.extracted += 1
+            except Exception as exc:  # noqa: BLE001
+                sub.failed += 1
+                log.warning("vk_posts.row.invalid", title=parsed.title, error=str(exc))
+
+    log.info("vk_posts.ok", source=source.name, extracted=sub.extracted)
+    sub.new = sub.extracted
+    return rows, sub
+
+
+async def _run_generic_source(
+    client: httpx.AsyncClient,
+    extractor: LLMExtractor,
+    supabase: Client | None,
+    city_slug: str,
+    llm_budget: int,
+    domain_budget: int,
+) -> tuple[list[EventRow], PipelineResult]:
+    """Одобренные в candidate_sources домены → JSON-LD / LLM (длинный хвост)."""
+    sub = PipelineResult()
+    rows, extracted, failed = await run_generic(
+        client, supabase, extractor, city_slug,
+        domain_budget=domain_budget, llm_budget=llm_budget,
+    )
+    sub.extracted = extracted
+    sub.failed = failed
+    sub.discovered = len(rows)
+    sub.new = extracted
+    return rows, sub
 
 
 async def _run_batch_source(

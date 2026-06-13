@@ -144,14 +144,19 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         only_source=args.source,
         twogis_api_key=settings.twogis_api_key,
         timepad_token=settings.timepad_token,
+        vk_service_key=settings.vk_service_key,
+        generic_llm_budget=settings.generic_llm_budget,
+        generic_domain_budget=settings.generic_domain_budget,
         mode_override=args.mode,
     )
     print(
         f"\nГотово: discovered={result.discovered}, "
         f"new={result.new}, extracted={result.extracted}, "
         f"failed={result.failed}, written={result.written}, "
-        f"duplicate_candidates={result.duplicate_candidates}"
+        f"merged={result.merged}, near_misses={result.near_misses}"
     )
+    if result.merged_by_source:
+        print(f"  merge по источникам: {result.merged_by_source}")
     return 0 if result.failed < result.extracted else 1
 
 
@@ -187,7 +192,9 @@ def main() -> int:
     )
     p_run.add_argument(
         "--mode",
-        choices=["per_url", "batch_listing", "direct_api"],
+        choices=[
+            "per_url", "batch_listing", "direct_api", "vk_events", "vk_posts", "generic"
+        ],
         default=None,
         help="Override extraction_mode из seeds.yaml (для разовых тестов)",
     )
