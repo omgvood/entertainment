@@ -160,6 +160,10 @@ class SourceConfig:
     event_type: Optional[str] = None
     """Тип, который присваивается всем событиям из этого источника."""
 
+    # Для direct_api / quizplease:
+    quizplease_city_id: Optional[int] = None
+    """ID города в QuizPlease API (api.quizplease.ru/api/games/schedule/{id})."""
+
     # Для vk_events / vk_posts:
     vk_city_id: Optional[int] = None
     """ID города VK для groups.search (опц.; если None — поиск только по названию города)."""
@@ -208,6 +212,7 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
                 provider=s.get("provider"),
                 api_query=s.get("api_query"),
                 event_type=s.get("event_type"),
+                quizplease_city_id=s.get("quizplease_city_id"),
                 vk_city_id=s.get("vk_city_id"),
                 vk_groups=s.get("vk_groups") or [],
                 telegram_sources=[

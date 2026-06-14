@@ -36,7 +36,7 @@ from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
 from .merge import merge_rows
 from .models import EventRow, EventType, ParsedEvent
-from .sources import KudaGoClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
+from .sources import KudaGoClient, QuizPleaseClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
 from .sources import vk as vk_mod
 from .sources.generic import run_generic
 from .validator import to_event_row
@@ -400,6 +400,11 @@ async def _fetch_direct_api_items(
     if source.provider == "kudago":
         # Ключ не нужен; тип события маппится из категорий KudaGo внутри клиента.
         return await KudaGoClient(client).search(source.api_query or city_slug)
+
+    if source.provider == "quizplease":
+        if not source.quizplease_city_id:
+            raise _DirectApiConfigError("нужен quizplease_city_id")
+        return await QuizPleaseClient(client, city_slug).search(source.quizplease_city_id)
 
     return None
 
