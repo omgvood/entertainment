@@ -9,8 +9,8 @@ import hashlib
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from urllib.parse import urljoin
+from datetime import date as _date, datetime, timezone
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import structlog
@@ -46,17 +46,44 @@ log = structlog.get_logger()
 
 # Мусорные значения event_url от LLM/JSON-LD — трактуем как «ссылки нет» (фолбэк на листинг).
 _JUNK_URLS = {"", "#", "javascript:void(0)"}
+# Сокращатели/трекеры, которые LLM ошибочно вытаскивает из тела VK/TG-поста как event_url.
+_JUNK_DOMAINS = {
+    "clck.ru", "vk.cc", "bit.ly", "t.co", "goo.gl",
+    "tinyurl.com", "ow.ly", "is.gd",
+}
 
 
 def _resolve_event_url(event_url: str | None, base_url: str) -> str:
     """event_url события → абсолютный source_url. Пусто/мусор → base_url (листинг/группа/канал).
 
     urljoin сам оставляет абсолютные ссылки как есть и достраивает относительные по base.
+    Голые ссылки-сокращатели из тела поста (clck.ru, vk.cc …) отбрасываем на фолбэк.
     """
     url = event_url.strip() if event_url else None
     if not url or url in _JUNK_URLS:
         return base_url
+    try:
+        domain = urlparse(url).netloc.lower().lstrip("www.")
+        if domain in _JUNK_DOMAINS:
+            log.debug("event_url.junk_domain", url=url, domain=domain)
+            return base_url
+    except Exception:  # noqa: BLE001 — кривой URL → фолбэк на base
+        return base_url
     return urljoin(base_url, url)
+
+
+def _is_past_event(event_date: str, today_str: str) -> bool:
+    """True, если дата события строго раньше сегодня — отсев репортажей о прошедшем.
+
+    'always' (постоянные места) и невалидные строки прошлыми не считаются: дату
+    валидирует Pydantic при сборке ParsedEvent, ValueError здесь — лишь подстраховка.
+    """
+    if event_date == "always":
+        return False
+    try:
+        return _date.fromisoformat(event_date) < _date.fromisoformat(today_str)
+    except ValueError:
+        return False
 
 
 @dataclass
@@ -492,8 +519,12 @@ async def _run_vk_posts_source(
             for u, t in candidates:
                 save_raw_document(supabase, source.name, u, t, "vk_post")
 
+        today_str = _date.today().isoformat()
         for parsed in parsed_events:
             try:
+                if _is_past_event(parsed.date, today_str):
+                    log.debug("vk_posts.skip.past", title=parsed.title[:50], date=parsed.date)
+                    continue
                 event_src_url = _resolve_event_url(parsed.event_url, group_url)
                 log.debug(
                     "vk_posts.event_url",
@@ -588,8 +619,12 @@ async def _run_telegram_posts_source(
             for u, t in candidates:
                 save_raw_document(supabase, f"telegram:{ch.channel}", u, t, "telegram_post")
 
+        today_str = _date.today().isoformat()
         for parsed in parsed_events:
             try:
+                if _is_past_event(parsed.date, today_str):
+                    log.debug("telegram_posts.skip.past", title=parsed.title[:50], date=parsed.date)
+                    continue
                 event_src_url = _resolve_event_url(parsed.event_url, channel_url)
                 log.debug(
                     "telegram_posts.event_url",
@@ -699,8 +734,12 @@ async def _run_batch_source(
     # относительные достраиваются через urljoin), иначе фолбэк на listing URL.
     # Дедуп между прогонами обеспечивается уникальностью (city, slug) на стороне БД.
     rows: list[EventRow] = []
+    today_str = _date.today().isoformat()
     for parsed in parsed_events:
         try:
+            if _is_past_event(parsed.date, today_str):
+                log.debug("batch.skip.past", title=parsed.title[:50], date=parsed.date)
+                continue
             event_src_url = _resolve_event_url(parsed.event_url, source.url)
             log.debug(
                 "batch.event_url",
