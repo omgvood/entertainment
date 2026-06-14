@@ -40,6 +40,10 @@ class ParsedEvent(BaseModel):
     image_url: Optional[str] = None
     description: Optional[str] = Field(default=None, max_length=500)
     organizer: Optional[str] = None
+    event_url: Optional[str] = Field(
+        default=None,
+        description="Прямая ссылка (href) на страницу именно этого события — относительная или абсолютная. null если нет явной ссылки.",
+    )
     tags: list[str] = Field(
         default_factory=list,
         description="Теги из закрытого набора taxonomy.ALLOWED_TAGS (для подборок/рекомендаций)",

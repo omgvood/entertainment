@@ -38,7 +38,7 @@ def upsert_events(client: Client, events: list[EventRow]) -> WriteStats:
     if not events:
         return stats
 
-    payload = [e.model_dump(mode="json") for e in events]
+    payload = [e.model_dump(mode="json", exclude={"event_url"}) for e in events]
     try:
         resp = client.table("events").upsert(payload, on_conflict="slug").execute()
         stats.inserted = len(resp.data or [])

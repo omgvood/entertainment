@@ -10,6 +10,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 
 import httpx
 import structlog
@@ -41,6 +42,20 @@ from .validator import to_event_row
 
 
 log = structlog.get_logger()
+
+# Мусорные значения event_url от LLM/JSON-LD — трактуем как «ссылки нет» (фолбэк на листинг).
+_JUNK_URLS = {"", "#", "javascript:void(0)"}
+
+
+def _resolve_event_url(event_url: str | None, base_url: str) -> str:
+    """event_url события → абсолютный source_url. Пусто/мусор → base_url (листинг/группа/канал).
+
+    urljoin сам оставляет абсолютные ссылки как есть и достраивает относительные по base.
+    """
+    url = event_url.strip() if event_url else None
+    if not url or url in _JUNK_URLS:
+        return base_url
+    return urljoin(base_url, url)
 
 
 @dataclass
@@ -99,6 +114,9 @@ async def run_city(
         all_rows: list[EventRow] = []
 
         for source in city.sources:
+            if not source.enabled:
+                log.info("source.disabled", source=source.name)
+                continue
             if only_source and source.name != only_source:
                 continue
             mode = mode_override or source.extraction_mode
@@ -467,7 +485,14 @@ async def _run_vk_posts_source(
 
         for parsed in parsed_events:
             try:
-                rows.append(to_event_row(parsed, city_slug, group_url, source.name))
+                event_src_url = _resolve_event_url(parsed.event_url, group_url)
+                log.debug(
+                    "vk_posts.event_url",
+                    title=parsed.title[:50],
+                    raw=parsed.event_url,
+                    resolved=event_src_url,
+                )
+                rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
                 sub.extracted += 1
             except Exception as exc:  # noqa: BLE001
                 sub.failed += 1
@@ -490,8 +515,8 @@ async def _run_telegram_posts_source(
 
     Зеркало vk-posts. Строгость префильтра берётся из source_type канала: у агрегаторов
     (много шума) фильтр строже, у организаторов — мягче. source_url события — ссылка на
-    канал (LLM не знает, из какого именно поста извлёк событие в batch), точная ссылка на
-    пост хранится per-post в raw_documents — там и смотрим происхождение при отладке.
+    конкретный пост (event_url, который LLM берёт из маркера «=== POST <url> ===»), иначе
+    фолбэк на ссылку канала.
     """
     sub = PipelineResult()
     if not source.telegram_sources:
@@ -556,7 +581,14 @@ async def _run_telegram_posts_source(
 
         for parsed in parsed_events:
             try:
-                rows.append(to_event_row(parsed, city_slug, channel_url, source.name))
+                event_src_url = _resolve_event_url(parsed.event_url, channel_url)
+                log.debug(
+                    "telegram_posts.event_url",
+                    title=parsed.title[:50],
+                    raw=parsed.event_url,
+                    resolved=event_src_url,
+                )
+                rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
                 sub.extracted += 1
             except Exception as exc:  # noqa: BLE001
                 sub.failed += 1
@@ -654,13 +686,21 @@ async def _run_batch_source(
             supabase, source.name, source.url, resp.text, "html", content_hash
         )
 
-    # 3. Маппинг в EventRow. В batch-режиме source_url у всех — это listing URL
-    # (точную ссылку на конкретное событие LLM не знает, можно добавить отдельным полем позже).
+    # 3. Маппинг в EventRow. source_url = прямая ссылка на событие (event_url из JSON-LD/LLM,
+    # относительные достраиваются через urljoin), иначе фолбэк на listing URL.
     # Дедуп между прогонами обеспечивается уникальностью (city, slug) на стороне БД.
     rows: list[EventRow] = []
     for parsed in parsed_events:
         try:
-            row = to_event_row(parsed, city_slug, source.url, source.name)
+            event_src_url = _resolve_event_url(parsed.event_url, source.url)
+            log.debug(
+                "batch.event_url",
+                title=parsed.title[:50],
+                raw=parsed.event_url,
+                resolved=event_src_url,
+                base=source.url,
+            )
+            row = to_event_row(parsed, city_slug, event_src_url, source.name)
             rows.append(row)
             sub.extracted += 1
         except Exception as exc:  # noqa: BLE001

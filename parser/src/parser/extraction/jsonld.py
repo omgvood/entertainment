@@ -111,6 +111,11 @@ def _object_to_event(obj: dict[str, Any], default_type: EventType) -> Optional[P
 
     price_min, price_max, price_text = _parse_offers(obj.get("offers"))
 
+    # Прямая ссылка на событие: url, иначе @id. Якорь (#...) — не страница, отбрасываем.
+    # Относительные url нормализуются в pipeline через urljoin.
+    raw_url = obj.get("url") or obj.get("@id")
+    event_url = _clean_str(raw_url) if raw_url and not str(raw_url).startswith("#") else None
+
     try:
         return ParsedEvent(
             title=title[:300],
@@ -126,6 +131,7 @@ def _object_to_event(obj: dict[str, Any], default_type: EventType) -> Optional[P
             image_url=_parse_image(obj.get("image")),
             description=_clean_description(obj.get("description")),
             organizer=_parse_organizer(obj.get("organizer")),
+            event_url=event_url,
         )
     except Exception as exc:  # noqa: BLE001 — невалидную запись просто пропускаем
         log.warning("jsonld.item_invalid", title=title, error=str(exc))
