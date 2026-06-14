@@ -51,12 +51,17 @@ def upsert_events(client: Client, events: list[EventRow]) -> WriteStats:
     return stats
 
 
-def upsert_venues(client: Client, venues: list[Venue]) -> WriteStats:
+def upsert_venues(
+    client: Client, venues: list[Venue], *, insert_only: bool = False
+) -> WriteStats:
     """Upsert площадок в таблицу venues по conflict id.
 
     Стратегия защиты ручного ввода: строки с source='manual' — primary source of truth,
     их автосбор (twogis/playwright) НЕ перезаписывает. Сначала выясняем, какие из id уже
     помечены manual, и исключаем их из payload.
+
+    insert_only=True → ON CONFLICT DO NOTHING (для bootstrap: не перетирать обогащения,
+    которые мог проставить refresh-venues).
     """
     stats = WriteStats()
     if not venues:
@@ -84,12 +89,17 @@ def upsert_venues(client: Client, venues: list[Venue]) -> WriteStats:
         return stats
 
     try:
-        resp = client.table("venues").upsert(payload, on_conflict="id").execute()
+        resp = (
+            client.table("venues")
+            .upsert(payload, on_conflict="id", ignore_duplicates=insert_only)
+            .execute()
+        )
         stats.inserted = len(resp.data or [])
         log.info(
             "db.venues.upsert.ok",
             written=stats.inserted,
             skipped_manual=len(manual_ids),
+            insert_only=insert_only,
         )
     except Exception as exc:  # noqa: BLE001
         stats.errors = len(payload)
@@ -97,6 +107,77 @@ def upsert_venues(client: Client, venues: list[Venue]) -> WriteStats:
         raise
 
     return stats
+
+
+def event_row_to_venue(row: dict, source: str = "twogis") -> Venue:
+    """Строка таблицы events (date='always') → Venue. id берём как есть (он уже {city}-{slug}).
+
+    Адаптер между моделями хранения (не валидация). Нормализуем source: events.source =
+    'twogis-bowling'/'twogis-billiards'/..., а venue.source = 'twogis' (огрублённая конвенция
+    venues; см. upsert_venues manual-guard).
+    """
+    return Venue(
+        id=row["id"],
+        city=row["city"],
+        name=row["venue_name"],
+        type=row["type"],
+        address=row.get("address") or None,
+        district=row.get("district"),
+        image_url=row.get("image_url"),
+        source=source,
+    )
+
+
+def sync_venues_from_events(
+    client: Client,
+    city: str,
+    source_like: str = "twogis-%",
+    *,
+    dry_run: bool = False,
+    insert_only: bool = False,
+) -> WriteStats:
+    """Импорт venues из постоянных мест в events (date='always', twogis-*).
+
+    dry_run — посчитать, но не писать. insert_only — ON CONFLICT DO NOTHING (для bootstrap).
+    Используется CLI-командой sync-venues (полная перезапись) и bootstrap (insert-only).
+    """
+    resp = (
+        client.table("events")
+        .select("id,city,venue_name,type,address,district,image_url")
+        .eq("city", city)
+        .eq("date", "always")
+        .like("source", source_like)
+        .execute()
+    )
+    venues = [event_row_to_venue(r) for r in (resp.data or [])]
+    if dry_run:
+        log.info("db.venues.sync.dry_run", city=city, would_import=len(venues))
+        return WriteStats()
+    return upsert_venues(client, venues, insert_only=insert_only)
+
+
+def bootstrap_venues_if_empty(client: Client, city: str) -> WriteStats | None:
+    """BOOTSTRAP-only: засеять venues из events ТОЛЬКО если для ЭТОГО ГОРОДА нет ни одной строки.
+
+    Если у города уже есть площадки — НЕ трогаем (бережём обогащения refresh-venues).
+    Проверка per-city: после сбоя perm=27/sochi=0 даст seed только для sochi.
+    INSERT-ONLY: даже при ошибочном срабатывании не перетирает существующие строки.
+    Имя намеренно явное — не синхронизация и не обновление, только первичный seed.
+    """
+    # Existence-check через LIMIT 1 (не count="exact": в схеме venues нет soft-delete,
+    # .eq(city) уже скоупит — считать все строки незачем).
+    resp = client.table("venues").select("id").eq("city", city).limit(1).execute()
+    if resp.data:
+        return None
+    vstats = sync_venues_from_events(client, city, insert_only=True)
+    log.info(
+        "db.venues.bootstrap.completed",
+        city=city,
+        source="events(always)",
+        reason="empty_table_recovery",
+        inserted=vstats.inserted,
+    )
+    return vstats
 
 
 def fetch_events_by_ids(client: Client, ids: list[str]) -> list[EventRow]:

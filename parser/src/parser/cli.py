@@ -23,7 +23,7 @@ import httpx
 import structlog
 
 from .config import CityConfig, LlmProvider, Settings, SourceConfig, load_seeds
-from .db import make_client, upsert_venues
+from .db import make_client, sync_venues_from_events, upsert_venues
 from .discovery import ListingDiscovery, SitemapDiscovery
 from .extraction import DeepSeekExtractor, GeminiExtractor, GroqExtractor, LLMExtractor
 from .models import ParsedEvent, Venue
@@ -271,6 +271,33 @@ async def _cmd_refresh_venues(args: argparse.Namespace) -> int:
     return rc
 
 
+def _cmd_sync_venues(args: argparse.Namespace) -> int:
+    """Пересборка venues из events(date='always', twogis-*).
+
+    Safe-by-default: без --force только dry-run (печатает «would import: N»). Это full-overwrite
+    инструмент — с --force перезапишет venues и затрёт обогащения refresh-venues (Playwright).
+    Отличие от bootstrap в run: тот INSERT-only и срабатывает лишь на пустой таблице.
+    """
+    settings = Settings.from_env()
+    _setup_logging(settings.log_level)
+    supabase = make_client(settings.supabase_url, settings.supabase_service_key)
+
+    cities = load_seeds()
+    targets = list(cities) if args.city == "all" else [args.city]
+    for t in targets:
+        if t not in cities:
+            print(f"Город {t!r} не описан в seeds.yaml", file=sys.stderr)
+            return 1
+
+    for slug in targets:
+        stats = sync_venues_from_events(supabase, slug, dry_run=not args.force)
+        if args.force:
+            print(f"  {slug}: записано venues {stats.inserted}, ошибок {stats.errors}")
+        else:
+            print(f"  {slug}: dry-run (без записи) — запусти с --force для перезаписи")
+    return 0
+
+
 async def _cmd_run(args: argparse.Namespace) -> int:
     """Полный пайплайн."""
     settings = Settings.from_env()
@@ -307,6 +334,7 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         f"\nГотово: discovered={result.discovered}, "
         f"new={result.new}, extracted={result.extracted}, "
         f"failed={result.failed}, written={result.written}, "
+        f"venues_seeded={result.venues_seeded}, "
         f"merged={result.merged}, near_misses={result.near_misses}"
     )
     if result.merged_by_source:
@@ -349,6 +377,17 @@ def main() -> int:
         help="auto (API, fallback на Playwright) / twogis (только API) / playwright (только браузер)",
     )
 
+    p_sv = sub.add_parser(
+        "sync-venues",
+        help="Пересборка venues из events(always, twogis-*). Safe-by-default: --force для записи",
+    )
+    p_sv.add_argument("--city", required=True, help="perm / sochi / all")
+    p_sv.add_argument(
+        "--force",
+        action="store_true",
+        help="Реально записать (без флага — dry-run). Перезапишет обогащения refresh-venues",
+    )
+
     p_run = sub.add_parser("run", help="Полный пайплайн")
     p_run.add_argument("--city", required=True)
     p_run.add_argument("--source", help="Имя одного источника")
@@ -383,6 +422,8 @@ def main() -> int:
         return _cmd_export_venues(args)
     if args.cmd == "refresh-venues":
         return asyncio.run(_cmd_refresh_venues(args))
+    if args.cmd == "sync-venues":
+        return _cmd_sync_venues(args)
     if args.cmd == "run":
         return asyncio.run(_cmd_run(args))
     return 1
