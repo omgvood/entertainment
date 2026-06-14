@@ -80,7 +80,7 @@ class TimepadClient:
             params = {
                 "limit": str(PAGE_SIZE),
                 "skip": str(skip),
-                "cities": city_name,
+                "cities[]": city_name,
                 "starts_at_min": today,
                 "sort": "+starts_at",
                 "fields": "location,poster_image,description_short,ticket_types,categories",
@@ -91,6 +91,13 @@ class TimepadClient:
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=20.0,
             )
+            if resp.status_code == 403:
+                log.error(
+                    "timepad.forbidden",
+                    city=city_slug,
+                    skip=skip,
+                    body=resp.text[:500],
+                )
             resp.raise_for_status()
             data = resp.json()
 
