@@ -20,6 +20,7 @@ from .classifiers import is_event_candidate
 from .config import CityConfig, SourceConfig
 from .db import (
     WriteStats,
+    bootstrap_venues_if_empty,
     cleanup_old_events,
     cleanup_old_raw_documents,
     fetch_events_by_ids,
@@ -65,6 +66,7 @@ class PipelineResult:
     extracted: int = 0
     failed: int = 0
     written: int = 0
+    venues_seeded: int = 0
     duplicate_candidates: int = 0
     merged: int = 0
     near_misses: int = 0
@@ -202,6 +204,13 @@ async def run_city(
             record_source_quality(
                 supabase, city.slug, _source_quality(extracted_by_source, merge.merged_by_source)
             )
+            # Bootstrap venues из events(always) — только если таблица города пуста (recovery).
+            # venues — source of truth; не валим прогон events, если seed не удался.
+            try:
+                vstats = bootstrap_venues_if_empty(supabase, city.slug)
+                result.venues_seeded = vstats.inserted if vstats else 0
+            except Exception as exc:  # noqa: BLE001
+                log.warning("venues.bootstrap.failed", city=city.slug, error=str(exc))
 
     return result
 

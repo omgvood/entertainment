@@ -84,6 +84,35 @@ export interface EventItem {
   metaDescription?: string;
 }
 
+/** Тип постоянной площадки. `other` — fallback для неизвестных типов из БД. */
+export type VenueType = 'bowling' | 'billiards' | 'karting' | 'quest' | 'other';
+
+export interface VenueItem {
+  id: string; // "{city}-{slug}"
+  city: City;
+  slug: string;
+  name: string;
+  /** string-fallback — новые типы из БД не ломают сборку. */
+  type: VenueType | string;
+  address?: string;
+  district?: string;
+  imageUrl?: string;
+  /** ISO-timestamp последнего обновления (для sitemap и отображения). */
+  updatedAt: string;
+}
+
+export const VENUE_TYPE_LABELS: Record<string, string> = {
+  bowling: 'Боулинг',
+  billiards: 'Бильярд',
+  karting: 'Картинг',
+  quest: 'Квест',
+};
+
+/** Безопасная метка типа площадки — fallback для неизвестных типов. */
+export function getVenueTypeLabel(type: string): string {
+  return VENUE_TYPE_LABELS[type] ?? 'Развлекательное место';
+}
+
 export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   quiz: 'Квиз',
   standup: 'Стендап',
