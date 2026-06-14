@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 import structlog
 from supabase import Client, create_client
 
-from .models import EventRow
+from .models import EventRow, Venue
 
 
 log = structlog.get_logger()
@@ -46,6 +46,54 @@ def upsert_events(client: Client, events: list[EventRow]) -> WriteStats:
     except Exception as exc:  # noqa: BLE001
         stats.errors = len(events)
         log.error("db.upsert.failed", error=str(exc), count=len(events))
+        raise
+
+    return stats
+
+
+def upsert_venues(client: Client, venues: list[Venue]) -> WriteStats:
+    """Upsert площадок в таблицу venues по conflict id.
+
+    Стратегия защиты ручного ввода: строки с source='manual' — primary source of truth,
+    их автосбор (twogis/playwright) НЕ перезаписывает. Сначала выясняем, какие из id уже
+    помечены manual, и исключаем их из payload.
+    """
+    stats = WriteStats()
+    if not venues:
+        return stats
+
+    ids = [v.id for v in venues]
+    manual_ids: set[str] = set()
+    for i in range(0, len(ids), 100):
+        chunk = ids[i : i + 100]
+        resp = (
+            client.table("venues")
+            .select("id")
+            .eq("source", "manual")
+            .in_("id", chunk)
+            .execute()
+        )
+        manual_ids.update(r["id"] for r in resp.data or [])
+
+    now = _utcnow()
+    payload = [
+        {**v.model_dump(), "updated_at": now} for v in venues if v.id not in manual_ids
+    ]
+    if not payload:
+        log.info("db.venues.upsert.skipped_all_manual", manual=len(manual_ids))
+        return stats
+
+    try:
+        resp = client.table("venues").upsert(payload, on_conflict="id").execute()
+        stats.inserted = len(resp.data or [])
+        log.info(
+            "db.venues.upsert.ok",
+            written=stats.inserted,
+            skipped_manual=len(manual_ids),
+        )
+    except Exception as exc:  # noqa: BLE001
+        stats.errors = len(payload)
+        log.error("db.venues.upsert.failed", error=str(exc), count=len(payload))
         raise
 
     return stats

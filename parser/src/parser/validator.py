@@ -9,7 +9,7 @@ import hashlib
 import re
 import unicodedata
 
-from .models import EventRow, ParsedEvent
+from .models import EventRow, ParsedEvent, Venue
 from .taxonomy import default_tags_for_type
 
 
@@ -28,6 +28,25 @@ def to_event_row(parsed: ParsedEvent, city: str, source_url: str, source: str) -
         source=source,
         parsed_at=EventRow.make_parsed_at_now(),
         fingerprint=_fingerprint(parsed.title, parsed.date, parsed.venue_name),
+    )
+
+
+def to_venue(parsed: ParsedEvent, city: str, source: str) -> Venue:
+    """ParsedEvent заведения (date='always') → строка таблицы venues.
+
+    Источники venues (2ГИС API и Playwright) отдают тот же ParsedEvent, что и события,
+    с date='always'. Здесь маппим его в плоскую venue-строку с детерминированным id.
+    """
+    slug = _make_slug(parsed.venue_name, "always")
+    return Venue(
+        id=f"{city}-{slug}",
+        city=city,
+        name=parsed.venue_name,
+        type=parsed.type,
+        address=parsed.address or None,
+        district=parsed.district,
+        image_url=parsed.image_url,
+        source=source,
     )
 
 

@@ -85,6 +85,25 @@ class ParsedEvent(BaseModel):
         return v
 
 
+class Venue(BaseModel):
+    """Постоянное заведение — строка таблицы `venues` (НЕ events).
+
+    Площадка не имеет даты: собирается из 2ГИС (API или Playwright-fallback) и пишется
+    в отдельную таблицу. Имена полей совпадают с колонками public.venues.
+    """
+
+    id: str
+    """{city}-{slug} — детерминированный (см. validator.to_venue)."""
+    city: str
+    name: str
+    type: str
+    address: Optional[str] = None
+    district: Optional[str] = None
+    image_url: Optional[str] = None
+    source: str = "playwright"
+    """'manual' / 'twogis' / 'playwright'. manual-строки upsert не перезаписывает (см. db.upsert_venues)."""
+
+
 class EventRow(ParsedEvent):
     """ParsedEvent + сервисные поля, готов к записи в Postgres."""
 

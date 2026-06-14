@@ -22,11 +22,13 @@ from pathlib import Path
 import httpx
 import structlog
 
-from .config import LlmProvider, Settings, load_seeds
-from .db import make_client
+from .config import CityConfig, LlmProvider, Settings, SourceConfig, load_seeds
+from .db import make_client, upsert_venues
 from .discovery import ListingDiscovery, SitemapDiscovery
 from .extraction import DeepSeekExtractor, GeminiExtractor, GroqExtractor, LLMExtractor
+from .models import ParsedEvent, Venue
 from .pipeline import run_city
+from .validator import to_venue
 
 
 def _make_extractor(settings: Settings, provider: LlmProvider) -> LLMExtractor:
@@ -162,6 +164,113 @@ def _cmd_export_venues(args: argparse.Namespace) -> int:
     return 0
 
 
+def _twogis_venue_sources(city: CityConfig) -> list[SourceConfig]:
+    """direct_api источники с provider=twogis — у них берём пары (api_query, event_type)."""
+    return [
+        s
+        for s in city.sources
+        if s.provider == "twogis" and s.api_query and s.event_type
+    ]
+
+
+async def _collect_via_twogis(
+    client: httpx.AsyncClient, sources: list[SourceConfig], api_key: str
+) -> list[ParsedEvent]:
+    from .sources.twogis import TwoGisClient
+
+    twogis = TwoGisClient(client, api_key)
+    out: list[ParsedEvent] = []
+    for s in sources:
+        out.extend(await twogis.search(s.api_query, event_type=s.event_type))  # type: ignore[arg-type]
+    return out
+
+
+async def _collect_via_playwright(
+    city_slug: str, sources: list[SourceConfig]
+) -> list[ParsedEvent]:
+    from .sources.playwright_2gis import scrape_venues
+
+    out: list[ParsedEvent] = []
+    for s in sources:
+        out.extend(await scrape_venues(city_slug, s.api_query, s.event_type))  # type: ignore[arg-type]
+    return out
+
+
+async def _collect_venues(
+    city: CityConfig, settings: Settings, *, source: str
+) -> tuple[list[Venue], str]:
+    """Собирает заведения города. Возвращает (venues, использованный_источник).
+
+    source='twogis'     — только API (без fallback).
+    source='playwright' — только браузер.
+    source='auto'       — пробуем API, при ошибке/пустом результате fallback на Playwright.
+    """
+    twogis_sources = _twogis_venue_sources(city)
+    if not twogis_sources:
+        print(f"  У города {city.slug!r} нет twogis-источников в seeds.yaml", file=sys.stderr)
+        return [], source
+
+    used = source
+    parsed: list[ParsedEvent] = []
+
+    if source == "playwright":
+        parsed = await _collect_via_playwright(city.slug, twogis_sources)
+    else:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "EventsBot/1.0 (pet-project)"}
+        ) as client:
+            try:
+                if not settings.twogis_api_key:
+                    raise RuntimeError("нет TWOGIS_API_KEY")
+                parsed = await _collect_via_twogis(
+                    client, twogis_sources, settings.twogis_api_key
+                )
+                used = "twogis"
+            except Exception as exc:  # noqa: BLE001
+                if source == "twogis":
+                    raise
+                print(f"  2ГИС API недоступен ({exc}) — fallback на Playwright", file=sys.stderr)
+                parsed = []
+
+        if source == "auto" and not parsed:
+            print("  2ГИС API вернул пусто — fallback на Playwright", file=sys.stderr)
+            parsed = await _collect_via_playwright(city.slug, twogis_sources)
+            used = "playwright"
+
+    venues = [to_venue(p, city.slug, used) for p in parsed]
+    return venues, used
+
+
+async def _cmd_refresh_venues(args: argparse.Namespace) -> int:
+    """Сбор постоянных заведений → таблица venues (НЕ events). 2ГИС API primary, Playwright fallback."""
+    settings = Settings.from_env()
+    _setup_logging(settings.log_level)
+    supabase = make_client(settings.supabase_url, settings.supabase_service_key)
+
+    cities = load_seeds()
+    targets = list(cities) if args.city == "all" else [args.city]
+    for t in targets:
+        if t not in cities:
+            print(f"Город {t!r} не описан в seeds.yaml", file=sys.stderr)
+            return 1
+
+    rc = 0
+    for slug in targets:
+        print(f"\n=== {slug} (source={args.source}) ===", file=sys.stderr)
+        try:
+            venues, used = await _collect_venues(cities[slug], settings, source=args.source)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ОШИБКА сбора: {exc}", file=sys.stderr)
+            rc = 1
+            continue
+        stats = upsert_venues(supabase, venues)
+        print(
+            f"  {slug}: собрано {len(venues)} (источник {used}), "
+            f"записано {stats.inserted}, ошибок {stats.errors}"
+        )
+    return rc
+
+
 async def _cmd_run(args: argparse.Namespace) -> int:
     """Полный пайплайн."""
     settings = Settings.from_env()
@@ -229,6 +338,17 @@ def main() -> int:
         help="Куда писать SQL (по умолчанию supabase/seeds/venues.sql)",
     )
 
+    p_rv = sub.add_parser(
+        "refresh-venues", help="Сбор постоянных заведений → таблица venues (2ГИС API / Playwright)"
+    )
+    p_rv.add_argument("--city", required=True, help="perm / sochi / all")
+    p_rv.add_argument(
+        "--source",
+        choices=["auto", "twogis", "playwright"],
+        default="auto",
+        help="auto (API, fallback на Playwright) / twogis (только API) / playwright (только браузер)",
+    )
+
     p_run = sub.add_parser("run", help="Полный пайплайн")
     p_run.add_argument("--city", required=True)
     p_run.add_argument("--source", help="Имя одного источника")
@@ -261,6 +381,8 @@ def main() -> int:
         return asyncio.run(_cmd_discover_sources(args))
     if args.cmd == "export-venues":
         return _cmd_export_venues(args)
+    if args.cmd == "refresh-venues":
+        return asyncio.run(_cmd_refresh_venues(args))
     if args.cmd == "run":
         return asyncio.run(_cmd_run(args))
     return 1

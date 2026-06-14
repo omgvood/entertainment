@@ -1,0 +1,58 @@
+name: Refresh venues
+
+# Сбор постоянных заведений (venues) из 2ГИС. Отдельный workflow, НЕ в parse.yml:
+# Playwright тяжёлый (браузер + chromium), не вписывается в 30-мин окно ежедневного парсинга.
+# Площадки меняются редко — раз в 2 недели достаточно. 2ГИС API остаётся primary, Playwright —
+# fallback (выбирается флагом source=auto). Контур venues, не events.
+on:
+  schedule:
+    - cron: "0 3 1,15 * *"  # 1-е и 15-е число, 03:00 UTC = 06:00 МСК
+  workflow_dispatch:
+    inputs:
+      city:
+        description: Город
+        type: choice
+        options: [perm, sochi, all]
+        default: all
+      source:
+        description: Источник сбора
+        type: choice
+        options: [auto, twogis, playwright]
+        default: auto
+
+jobs:
+  refresh-venues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: Production
+
+    defaults:
+      run:
+        working-directory: parser
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: parser/pyproject.toml
+
+      - name: Install deps (+ playwright)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[playwright]"
+
+      - name: Install chromium
+        run: playwright install chromium --with-deps
+
+      - name: Refresh venues
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TWOGIS_API_KEY: ${{ secrets.TWOGIS_API_KEY }}
+        run: |
+          python -m parser.cli refresh-venues \
+            --city "${{ github.event.inputs.city || 'all' }}" \
+            --source "${{ github.event.inputs.source || 'auto' }}"
