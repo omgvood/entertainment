@@ -26,6 +26,7 @@ cities:
         provider: quizplease
         quizplease_city_id: 62
         priority: 60
+        full_snapshot: true  # API обходит все страницы (_MAX_PAGES=20) → полный срез
 
       # 2ГИС — места «всегда» (Сочи)
       - name: twogis-bowling
@@ -115,6 +116,7 @@ cities:
         extraction_mode: direct_api
         provider: quizplease
         quizplease_city_id: 37
+        full_snapshot: true  # API обходит все страницы (_MAX_PAGES=20) → полный срез
         priority: 60
 
       # 2ГИС — места «всегда» (боулинг/бильярд/картинг)

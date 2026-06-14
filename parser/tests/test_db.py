@@ -1,6 +1,58 @@
 """Тесты чистых функций db.py (без сети/клиента)."""
 
-from parser.db import event_row_to_venue
+from unittest.mock import MagicMock
+
+from parser.db import event_row_to_venue, sync_source_events
+
+
+# --- sync_source_events ---
+
+def _mock_client(deleted_rows: list) -> tuple[MagicMock, MagicMock]:
+    """Мок цепочки client.table(...).delete().eq()...execute()."""
+    client = MagicMock()
+    execute = MagicMock(return_value=MagicMock(data=deleted_rows))
+    chain = client.table.return_value.delete.return_value
+    chain.eq.return_value = chain
+    chain.neq.return_value = chain
+    chain.gte.return_value = chain
+    chain.not_ = MagicMock()
+    chain.not_.in_.return_value = chain
+    chain.execute = execute
+    return client, execute
+
+
+def test_sync_source_events_deletes_stale():
+    client, execute = _mock_client([{"id": "sochi-old-quiz"}])
+    deleted = sync_source_events(client, "quizplease", "sochi", {"sochi-new-1", "sochi-new-2"})
+    assert deleted == 1
+    execute.assert_called_once()
+
+
+def test_sync_source_events_skips_empty_ids():
+    client, execute = _mock_client([])
+    deleted = sync_source_events(client, "quizplease", "sochi", set())
+    assert deleted == 0
+    execute.assert_not_called()
+
+
+def test_sync_source_events_returns_zero_on_exception():
+    client = MagicMock()
+    chain = client.table.return_value.delete.return_value
+    chain.eq.return_value = chain
+    chain.neq.return_value = chain
+    chain.gte.return_value = chain
+    chain.not_ = MagicMock()
+    chain.not_.in_.return_value = chain
+    chain.execute.side_effect = RuntimeError("connection error")
+    deleted = sync_source_events(client, "quizplease", "sochi", {"sochi-id-1"})
+    assert deleted == 0
+
+
+def test_sync_source_events_nothing_stale():
+    client, execute = _mock_client([])
+    deleted = sync_source_events(client, "quizplease", "sochi", {"sochi-id-1", "sochi-id-2"})
+    assert deleted == 0
+    execute.assert_called_once()
 
 
 def test_event_row_to_venue_maps_fields():

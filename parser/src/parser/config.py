@@ -144,6 +144,10 @@ class SourceConfig:
     priority: int = 0
     enabled: bool = True
     """Приоритет источника при кросс-источниковой дедупликации (выше — побеждает). Шаг 6."""
+    full_snapshot: bool = False
+    # True = один вызов возвращает ВСЕ будущие события источника для города.
+    # Включает автоматическое удаление событий, пропавших из источника (синхронизация отмен).
+    # НЕ включать для batch_listing с пагинацией/lazy-loading, vk_posts, telegram, generic.
 
     # Для per_url и batch_listing:
     kind: Optional[DiscoveryKind] = None
@@ -213,6 +217,7 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
                 api_query=s.get("api_query"),
                 event_type=s.get("event_type"),
                 quizplease_city_id=s.get("quizplease_city_id"),
+                full_snapshot=s.get("full_snapshot", False),
                 vk_city_id=s.get("vk_city_id"),
                 vk_groups=s.get("vk_groups") or [],
                 telegram_sources=[

@@ -29,6 +29,7 @@ from .db import (
     record_source_health,
     record_source_quality,
     save_raw_document,
+    sync_source_events,
     upsert_events,
 )
 from .dedup import filter_new_urls
@@ -180,6 +181,8 @@ async def run_city(
                     client, source, extractor, supabase, city.slug, dry_run
                 )
             duration = time.perf_counter() - started
+            if source.full_snapshot and not dry_run and supabase is not None and rows:
+                sync_source_events(supabase, source.name, city.slug, {r.id for r in rows})
             all_rows.extend(rows)
             result.discovered += sub.discovered
             result.new += sub.new

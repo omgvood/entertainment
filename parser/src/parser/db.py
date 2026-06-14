@@ -200,7 +200,7 @@ def fetch_events_by_ids(client: Client, ids: list[str]) -> list[EventRow]:
     return rows
 
 
-def cleanup_old_events(client: Client, city: str, days_to_keep: int = 7) -> int:
+def cleanup_old_events(client: Client, city: str, days_to_keep: int = 1) -> int:
     """Удаляет события с истёкшей датой (не 'always') старше days_to_keep дней.
 
     Возвращает количество удалённых строк.
@@ -221,6 +221,51 @@ def cleanup_old_events(client: Client, city: str, days_to_keep: int = 7) -> int:
         return deleted
     except Exception as exc:  # noqa: BLE001
         log.warning("db.cleanup.failed", city=city, error=str(exc))
+        return 0
+
+
+def sync_source_events(
+    client: Client, source: str, city: str, current_ids: set[str]
+) -> int:
+    """Удаляет будущие события источника, не вернувшиеся в текущем прогоне.
+
+    Вызывать только для источников с full_snapshot=True.
+    Если current_ids пуст (ошибка сети / API вернул 0) — ничего не удаляем,
+    логируем WARNING для ручной проверки.
+    """
+    if not current_ids:
+        log.warning(
+            "db.sync_source.skipped_empty",
+            source=source,
+            city=city,
+            reason="пустой current_ids — возможный сбой парсинга, синхронизация пропущена",
+        )
+        return 0
+
+    today = date.today().isoformat()
+    try:
+        resp = (
+            client.table("events")
+            .delete()
+            .eq("source", source)
+            .eq("city", city)
+            .neq("date", "always")
+            .gte("date", today)
+            .not_.in_("id", list(current_ids))
+            .execute()
+        )
+        deleted = len(resp.data or [])
+        if deleted:
+            log.info(
+                "db.sync_source.ok",
+                source=source,
+                city=city,
+                deleted=deleted,
+                kept=len(current_ids),
+            )
+        return deleted
+    except Exception as exc:  # noqa: BLE001
+        log.warning("db.sync_source.failed", source=source, city=city, error=str(exc))
         return 0
 
 
