@@ -20,12 +20,11 @@
 cities:
   sochi:
     sources:
-      # QuizPlease Сочи
+      # QuizPlease Сочи (city_id=62 — api.quizplease.ru/api/games/schedule/62)
       - name: quizplease
-        kind: listing
-        url: https://sochi.quizplease.ru/schedule
-        url_pattern: "/game-page\\?id=\\d+"
-        extraction_mode: batch_listing
+        extraction_mode: direct_api
+        provider: quizplease
+        quizplease_city_id: 62
         priority: 60
 
       # 2ГИС — места «всегда» (Сочи)
@@ -110,12 +109,12 @@ cities:
 
   perm:
     sources:
-      # QuizPlease: на странице расписания видны все игры → batch_listing
+      # QuizPlease Пермь (city_id=37 — api.quizplease.ru/api/games/schedule/37)
+      # Сайт — SPA (Nuxt), статический HTML не содержит событий → direct_api
       - name: quizplease
-        kind: listing
-        url: https://perm.quizplease.ru/schedule
-        url_pattern: "/game-page\\?id=\\d+"   # используется только если --mode per_url
-        extraction_mode: batch_listing
+        extraction_mode: direct_api
+        provider: quizplease
+        quizplease_city_id: 37
         priority: 60
 
       # 2ГИС — места «всегда» (боулинг/бильярд/картинг)

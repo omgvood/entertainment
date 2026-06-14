@@ -98,20 +98,28 @@ python -m parser.cli run --city sochi
 
 | Город | Источник | Режим | Описание |
 |---|---|---|---|
-| perm | quizplease | batch_listing | QuizPlease Пермь — один LLM-вызов на всё расписание |
+| perm | quizplease | direct_api | QuizPlease Пермь — REST API `api.quizplease.ru` (city_id=37), без LLM |
 | perm | twogis-bowling | direct_api | Боулинг-клубы Перми из 2ГИС |
 | perm | twogis-billiards | direct_api | Бильярдные Перми из 2ГИС |
 | perm | twogis-karting | direct_api | Картинг-центры Перми из 2ГИС |
-| sochi | quizplease | batch_listing | QuizPlease Сочи |
+| perm | timepad | direct_api | Широкая афиша (концерты/театр/выставки) через Timepad API |
+| perm | vk-posts | vk_posts | Посты кураторских VK-сообществ → LLM (сервисный ключ) |
+| perm | telegram-posts | telegram_posts | Посты публичных Telegram-каналов → LLM (без авторизации) |
+| sochi | quizplease | direct_api | QuizPlease Сочи — REST API (city_id=62), без LLM |
 | sochi | twogis-bowling | direct_api | Боулинг Сочи |
 | sochi | twogis-billiards | direct_api | Бильярд Сочи |
 | sochi | twogis-karting | direct_api | Картинг Сочи |
+| sochi | timepad | direct_api | Широкая афиша Сочи через Timepad API |
+| sochi | vk-posts | vk_posts | VK-сообщества Сочи → LLM |
+| sochi | telegram-posts | telegram_posts | Telegram-каналы Сочи → LLM |
 
 ### Режимы извлечения
 
-- **batch_listing** — скачиваем страницу целиком, один LLM-вызов извлекает все события сразу. Используется для QuizPlease.
-- **direct_api** — вызываем внешнее API (2ГИС), маппим JSON → `ParsedEvent` без LLM.
+- **direct_api** — вызываем внешнее API (QuizPlease / 2ГИС / Timepad), маппим JSON → `ParsedEvent` без LLM.
+- **batch_listing** — скачиваем страницу целиком, один LLM-вызов извлекает все события сразу (для статических HTML-листингов).
 - **per_url** — дискавери находит N URL → N отдельных LLM-вызовов. Для источников с детальными страницами событий.
+- **vk_posts** — посты со стен `vk_groups`: префильтр → один `extract_many` на группу.
+- **telegram_posts** — посты публичных каналов через `t.me/s/`: префильтр → один `extract_many` на канал.
 
 ### Добавить новый источник
 
@@ -148,24 +156,38 @@ python -m parser.cli run --city sochi
 ```
 parser/
 ├── config/
-│   └── seeds.yaml          — источники по городам (URL, режим, тип события)
+│   └── seeds.yaml              — источники по городам (URL, режим, тип события)
 ├── src/parser/
-│   ├── cli.py              — точка входа: discover / run / --dry-run / --provider
-│   ├── config.py           — Settings (env-переменные) + load_seeds()
-│   ├── models.py           — ParsedEvent (LLM-ответ), EventRow (строка БД)
-│   ├── pipeline.py         — оркестратор: запускает источники, дедупит, пишет в БД
-│   ├── db.py               — upsert_events() + cleanup_old_events()
-│   ├── dedup.py            — фильтрация уже известных source_url
-│   ├── validator.py        — ParsedEvent → EventRow (slug, типы, санитизация)
+│   ├── cli.py                  — точка входа: discover / run / --dry-run / --provider
+│   ├── config.py               — Settings (env-переменные) + SourceConfig + load_seeds()
+│   ├── models.py               — ParsedEvent (LLM-ответ), EventRow (строка БД)
+│   ├── taxonomy.py             — закрытый набор тегов + авто-теги по типу события
+│   ├── classifiers.py          — общий префильтр is_event_candidate (VK/Telegram)
+│   ├── http_utils.py           — fetch_with_retry (3 попытки, exponential backoff)
+│   ├── pipeline.py             — оркестратор: запускает источники, merge, пишет в БД
+│   ├── merge.py                — кросс-источниковое слияние дублей по priority
+│   ├── db.py                   — upsert_events() + raw_documents + health/coverage
+│   ├── dedup.py                — фильтрация уже известных source_url
+│   ├── validator.py            — ParsedEvent → EventRow (slug, fingerprint, авто-теги)
 │   ├── discovery/
-│   │   ├── listing.py      — краулер страниц-листингов
-│   │   └── sitemap.py      — краулер sitemap.xml
+│   │   ├── listing.py          — краулер страниц-листингов
+│   │   └── sitemap.py          — краулер sitemap.xml
 │   ├── extraction/
-│   │   ├── gemini_extractor.py   — Gemini через google-genai SDK
-│   │   └── groq_extractor.py     — Groq через groq SDK
+│   │   ├── jsonld.py           — Schema.org JSON-LD (бесплатно, перед LLM)
+│   │   ├── gemini_extractor.py — Gemini через google-genai SDK
+│   │   ├── groq_extractor.py   — Groq через groq SDK
+│   │   └── deepseek_extractor.py — DeepSeek через OpenRouter
 │   └── sources/
-│       └── twogis.py       — 2ГИС Places API → ParsedEvent
-└── tests/                  — smoke-тесты без сети (pytest)
+│       ├── quizplease.py       — QuizPlease REST API → ParsedEvent (без LLM)
+│       ├── twogis.py           — 2ГИС Catalog API → ParsedEvent (без LLM)
+│       ├── playwright_2gis.py  — 2ГИС через Playwright (fallback для refresh-venues)
+│       ├── timepad.py          — Timepad API → ParsedEvent (без LLM)
+│       ├── kudago.py           — KudaGo API (отключён, данные устарели)
+│       ├── vk.py               — VK API: посты и события-сообщества
+│       ├── telegram.py         — Telegram: посты публичных каналов через t.me/s/
+│       ├── generic.py          — generic-парсер одобренных candidate_sources
+│       └── candidate_sources.py — Discovery новых источников (поиск → скоринг → БД)
+└── tests/                      — smoke-тесты без сети (pytest)
 ```
 
 ---
