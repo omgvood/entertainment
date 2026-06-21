@@ -27,7 +27,7 @@ dev = [
 # НЕ в базовых зависимостях — тяжёлый, ежедневному парсингу не нужен.
 playwright = [
     "playwright>=1.45",
-    "playwright-stealth>=1.0.6",
+    "playwright-stealth>=1.0.6,<2.0",
 ]
 
 [project.scripts]

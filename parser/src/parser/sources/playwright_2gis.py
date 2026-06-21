@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Optional
+import re
 
 import structlog
 from selectolax.parser import HTMLParser
@@ -32,21 +32,48 @@ log = structlog.get_logger()
 
 # ============================================================================
 # СЕЛЕКТОРЫ 2ГИС — ЧИНИТЬ ТУТ.
-# Классы 2ГИС обфусцированы (вида `_1kqrd4hi`) и меняются при редеплое их фронта.
+# Классы 2ГИС обфусцированы (вида `_1kf6gff`) и меняются при редеплое их фронта.
 # Если parse_cards перестал находить карточки — открой 2gis.ru/{city}/search/{query}
-# в браузере с DevTools, найди контейнер карточки организации в выдаче и обнови
-# селекторы ниже (и заодно фикстуру в tests/test_playwright_2gis.py).
+# в браузере, сохрани HTML (DevTools → Console: copy(document.body.outerHTML)),
+# запусти debug_parse_2gis.py и обнови константы ниже + фикстуру в tests/test_playwright_2gis.py.
+# Стабильные якоря (меняются реже): _NAME_SELECTOR, _ADDRESS_SELECTOR.
 # ============================================================================
-_CARD_SELECTOR = "div._1kqrd4hi"        # контейнер одной карточки организации
-_NAME_SELECTOR = "span._lvwrwt"         # название заведения
-_ADDRESS_SELECTOR = "div._klarpw"       # строка адреса под названием
-_DISTRICT_SELECTOR = "div._14quei"      # район (часто отсутствует)
-_IMAGE_SELECTOR = "img"                 # превью-фото карточки
-# Контейнер прокручиваемой выдачи (для дозагрузки lazy-load карточек):
+_CARD_SELECTOR = "div._1kf6gff, div._5b28jpo"
+                                   # _1kf6gff — органические результаты
+                                   # _5b28jpo — рекламные карточки (promoted)
+                                   # доступ к имени и адресу одинаков для обоих типов
+_LINK_SELECTOR = "a._1rehek"       # anchor на страницу заведения; .text() = название
+                                   # (стабильнее, чем класс span — разные типы карточек
+                                   #  используют _lvwrwt, _9r89aog и т.д.)
+_ADDRESS_SELECTOR = "div._klarpw"  # строка адреса (также содержит статусы — см. _STATUS_RE)
+_IMAGE_SELECTOR = "div._1dk5lq4"   # фото-div с background-image (первый = основное фото)
+# Контейнер прокручиваемой выдачи (для дозагрузки lazy-load карточек).
+# При несовпадении _scroll_results падает в except → fallback на page.mouse.wheel:
 _RESULTS_SCROLL_SELECTOR = "div._z1qx2c"
+
+# Строки-статусы, которые 2ГИС кладёт в тот же div._klarpw, что и адрес.
+# Без ^ — ловит «Временно не работает», «До открытия 40 мин.» и т.п.
+_STATUS_RE = re.compile(
+    r"(закро|открыт|работ|круглосуточ|перерыв|обед|до открытия|временно|филиал)",
+    re.IGNORECASE,
+)
+
+_BG_URL_2X = re.compile(r'url\(["\']?(https://[^"\')\s]+)["\']?\)\s*2x')
+_BG_URL_ANY = re.compile(r'url\(["\']?(https://[^"\')\s]+)["\']?\)')
 
 _BASE = "https://2gis.ru"
 _NAV_TIMEOUT_MS = 30_000
+
+
+def _extract_bg_image(style: str | None) -> str | None:
+    """Извлекает URL из background-image CSS (приоритет: 2x > любой)."""
+    if not style:
+        return None
+    m = _BG_URL_2X.search(style)
+    if m:
+        return m.group(1)
+    m = _BG_URL_ANY.search(style)
+    return m.group(1) if m else None
 
 
 def parse_cards(html: str, event_type: EventType) -> list[ParsedEvent]:
@@ -60,13 +87,22 @@ def parse_cards(html: str, event_type: EventType) -> list[ParsedEvent]:
     seen: set[str] = set()
 
     for card in tree.css(_CARD_SELECTOR):
-        name_node = card.css_first(_NAME_SELECTOR)
-        name = name_node.text(strip=True) if name_node else ""
+        # Имя — из anchor-ссылки на заведение; независимо от класса внутреннего span.
+        link = card.css_first(_LINK_SELECTOR)
+        name = link.text(strip=True).replace("\xa0", " ").strip() if link else ""
         if not name:
             continue
 
-        addr_node = card.css_first(_ADDRESS_SELECTOR)
-        address = addr_node.text(strip=True) if addr_node else ""
+        # Адрес — первый _klarpw, который не является строкой статуса.
+        # В одной карточке может быть несколько _klarpw: адрес + статус работы.
+        address = ""
+        for addr_node in card.css(_ADDRESS_SELECTOR):
+            text = addr_node.text(strip=True).replace("\xa0", " ").strip()
+            # Убираем суффикс «N филиала» (иногда клеится к адресу в том же узле).
+            text = re.sub(r"\s*\d+\s+филиал[а-я]*\s*$", "", text).strip()
+            if text and not _STATUS_RE.search(text):
+                address = text
+                break
         if not address:
             continue
 
@@ -76,11 +112,9 @@ def parse_cards(html: str, event_type: EventType) -> list[ParsedEvent]:
             continue
         seen.add(key)
 
-        district_node = card.css_first(_DISTRICT_SELECTOR)
-        district = district_node.text(strip=True) if district_node else None
-
+        # Фото: 2ГИС использует background-image вместо <img>.
         img_node = card.css_first(_IMAGE_SELECTOR)
-        image_url = img_node.attributes.get("src") if img_node else None
+        image_url = _extract_bg_image(img_node.attributes.get("style") if img_node else None)
 
         try:
             venues.append(
@@ -93,8 +127,8 @@ def parse_cards(html: str, event_type: EventType) -> list[ParsedEvent]:
                     price_text="по тарифам заведения",
                     address=address,
                     venue_name=name,
-                    district=district,
-                    image_url=image_url or None,
+                    district=None,  # район убран из карточки в текущей вёрстке 2ГИС
+                    image_url=image_url,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — битую карточку просто пропускаем
@@ -148,6 +182,10 @@ async def scrape_venues(
 
     venues = parse_cards(html, event_type)
     log.info("playwright_2gis.ok", city=city, query=query, extracted=len(venues))
+    if not venues:
+        # Помогает диагностировать: антибот-заглушка или сломанные селекторы.
+        snippet = html[:2000].replace("\n", " ")
+        log.warning("playwright_2gis.empty_result", city=city, query=query, html_snippet=snippet)
     return venues
 
 
