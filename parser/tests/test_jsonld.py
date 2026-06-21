@@ -71,6 +71,32 @@ def test_extract_from_graph_and_price_range():
     assert ev.address == "Комсомольский пр., 1"
 
 
+def test_schema_type_overrides_default():
+    """Подтип Schema.org (MusicEvent) → concert, игнорируя default_type."""
+    html = """
+    <script type="application/ld+json">
+    {"@type":"MusicEvent","name":"Органный концерт","startDate":"2026-07-02T19:00:00+03:00",
+     "location":{"name":"Органный зал","address":"ул. Ленина, 51Б"}}
+    </script>
+    """
+    events = extract_jsonld_events(html, "other")
+    assert len(events) == 1
+    assert events[0].type == "concert"
+
+
+def test_generic_event_falls_back_to_default():
+    """Родовой @type=Event не имеет маппинга → берётся default_type."""
+    html = """
+    <script type="application/ld+json">
+    {"@type":"Event","name":"Непонятное событие","startDate":"2026-07-02",
+     "location":{"name":"Площадка","address":"ул. Мира, 1"}}
+    </script>
+    """
+    events = extract_jsonld_events(html, "other")
+    assert len(events) == 1
+    assert events[0].type == "other"
+
+
 def test_no_jsonld_returns_empty():
     assert extract_jsonld_events(_HTML_NO_JSONLD, "quiz") == []
 

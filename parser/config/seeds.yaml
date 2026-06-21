@@ -212,10 +212,12 @@ cities:
             enabled: true
           # Мастер-классы / арт-пространства
 
-      # Generic — одобренные кандидаты (длинный хвост). Включить после замера покрытия VK.
-      # - name: generic
-      #   extraction_mode: generic
-      #   priority: 20
+      # Generic — одобренные в candidate_sources домены (длинный хвост).
+      # ВКЛЮЧЁН для Перми (эксперимент). Домены берутся из candidate_sources WHERE
+      # status='approved'; бюджеты — GENERIC_DOMAIN_BUDGET / GENERIC_LLM_BUDGET в .env.
+      - name: generic
+        extraction_mode: generic
+        priority: 20
 
       # DeepSeek тестовый источник (раскомментировать для локального тестирования)
       # - name: quizplease-deepseek-test

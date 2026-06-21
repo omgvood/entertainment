@@ -37,6 +37,30 @@ _EVENT_TYPES = {
     "BusinessEvent",
 }
 
+# Schema.org подтип Event → наш EventType. Родовой "Event"/"SocialEvent" и незнакомые
+# подтипы маппинга не имеют → падают на default_type из конфига источника.
+_SCHEMA_TYPE_MAP: dict[str, EventType] = {
+    "MusicEvent": "concert",
+    "TheaterEvent": "theater",
+    "ComedyEvent": "standup",
+    "Festival": "festival",
+    "ExhibitionEvent": "exhibition",
+    "ScreeningEvent": "cinema",
+    "EducationEvent": "education",
+    "SportsEvent": "sport",
+    "BusinessEvent": "business",
+}
+
+
+def _resolve_type(obj_type: Any, default_type: EventType) -> EventType:
+    """Schema.org @type → EventType. Фолбэк на default_type, если подтип родовой/незнакомый."""
+    types = obj_type if isinstance(obj_type, list) else [obj_type]
+    for t in types:
+        mapped = _SCHEMA_TYPE_MAP.get(t)
+        if mapped:
+            return mapped
+    return default_type
+
 
 def extract_jsonld_events(html: str, default_type: EventType) -> list[ParsedEvent]:
     """Парсит все <script type="application/ld+json"> и возвращает события.
@@ -119,7 +143,7 @@ def _object_to_event(obj: dict[str, Any], default_type: EventType) -> Optional[P
     try:
         return ParsedEvent(
             title=title[:300],
-            type=default_type,
+            type=_resolve_type(obj.get("@type"), default_type),
             date=date_str,
             time_start=time_start,
             time_end=time_end,
