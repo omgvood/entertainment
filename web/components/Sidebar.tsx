@@ -24,9 +24,6 @@ export function Sidebar({ filters, onChange, availableTypes }: SidebarProps) {
   const setPrice = (priceMin: number, priceMax: number) =>
     onChange({ ...filters, priceMin, priceMax });
 
-  const setOnlyFixed = (onlyFixedDate: boolean) =>
-    onChange({ ...filters, onlyFixedDate });
-
   return (
     <aside className="bg-surface border border-border rounded-xl p-5 shadow-sm lg:sticky lg:top-[76px] self-start">
       <FilterBlock title="Тип">
@@ -93,20 +90,6 @@ export function Sidebar({ filters, onChange, availableTypes }: SidebarProps) {
         <CheckboxRow label="Мотовилиха" disabled />
         <CheckboxRow label="Индустриальный" disabled />
       </FilterBlock>
-
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filters.onlyFixedDate}
-            onChange={(e) => setOnlyFixed(e.target.checked)}
-          />
-          Только с фиксированной датой
-        </label>
-        <p className="mt-1.5 ml-6 text-xs text-muted">
-          Скрыть боулинг/бильярд/картинг при поиске «сегодня вечером»
-        </p>
-      </div>
     </aside>
   );
 }

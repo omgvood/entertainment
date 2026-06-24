@@ -334,7 +334,6 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         f"\nГотово: discovered={result.discovered}, "
         f"new={result.new}, extracted={result.extracted}, "
         f"failed={result.failed}, written={result.written}, "
-        f"venues_seeded={result.venues_seeded}, "
         f"merged={result.merged}, near_misses={result.near_misses}"
     )
     if result.merged_by_source:

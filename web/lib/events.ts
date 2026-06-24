@@ -68,14 +68,30 @@ function rowToEvent(r: EventRow): EventItem {
   };
 }
 
-export async function getEventsByCity(city: City): Promise<EventItem[]> {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+/** IANA-таймзона города — «сегодня» считается по местному времени, не по UTC сервера сборки. */
+const CITY_TIMEZONES: Record<City, string> = {
+  perm: "Asia/Yekaterinburg", // UTC+5
+  sochi: "Europe/Moscow", // UTC+3
+};
 
+export async function getEventsByCity(city: City): Promise<EventItem[]> {
+  const timezone = CITY_TIMEZONES[city] ?? "Europe/Moscow";
+  // en-CA даёт YYYY-MM-DD; timeZone делает дату местной (билд идёт в 21:00 UTC).
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
+  // .neq('always') обязателен: в строковом сравнении Postgres 'always' >= 'YYYY-MM-DD' = TRUE,
+  // т.е. .gte сам по себе always-строки НЕ отсекает. Площадки живут в таблице venues, не в сетке.
   const { data, error } = await supabase
     .from("events")
     .select("*")
     .eq("city", city)
-    .or(`date.eq.always,date.gte.${today}`)
+    .neq("date", "always")
+    .gte("date", today)
     .order("date", { ascending: true });
 
   if (error) {

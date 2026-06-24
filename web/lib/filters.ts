@@ -13,8 +13,6 @@ export interface Filters {
   when: WhenFilter;
   priceMin: number;
   priceMax: number;
-  /** Если true — скрыть события с date='always' (боулинг/бильярд/картинг). */
-  onlyFixedDate: boolean;
 }
 
 export const ALL_TYPES: readonly EventType[] = [
@@ -55,7 +53,6 @@ export const DEFAULT_FILTERS: Filters = {
   when: "any",
   priceMin: 0,
   priceMax: 5000,
-  onlyFixedDate: true,
 };
 
 function toYMD(d: Date): string {
@@ -92,17 +89,14 @@ export function applyFilters(events: EventItem[], filters: Filters): EventItem[]
     // 1. Тип
     if (!filters.types.has(event.type)) return false;
 
-    // 2. Только с фиксированной датой
-    if (filters.onlyFixedDate && event.date === "always") return false;
-
-    // 3. Когда (для 'always' пропускаем — оно доступно всегда; иначе сравниваем точно)
-    if (filters.when !== "any" && event.date !== "always") {
+    // 2. Когда
+    if (filters.when !== "any") {
       if (filters.when === "today" && event.date !== today) return false;
       if (filters.when === "tomorrow" && event.date !== tomorrow) return false;
       if (filters.when === "weekend" && !weekend!.has(event.date)) return false;
     }
 
-    // 4. Цена — пересечение диапазонов
+    // 3. Цена — пересечение диапазонов
     if (event.priceMax < filters.priceMin) return false;
     if (event.priceMin > filters.priceMax) return false;
 

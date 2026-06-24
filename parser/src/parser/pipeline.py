@@ -20,7 +20,6 @@ from .classifiers import is_event_candidate
 from .config import CityConfig, SourceConfig
 from .db import (
     WriteStats,
-    bootstrap_venues_if_empty,
     cleanup_old_events,
     cleanup_old_raw_documents,
     fetch_events_by_ids,
@@ -31,16 +30,17 @@ from .db import (
     save_raw_document,
     sync_source_events,
     upsert_events,
+    upsert_venues,
 )
 from .dedup import filter_new_urls
 from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
 from .merge import merge_rows
-from .models import EventRow, EventType, ParsedEvent
+from .models import EventRow, EventType, ParsedEvent, Venue
 from .sources import KudaGoClient, QuizPleaseClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
 from .sources import vk as vk_mod
 from .sources.generic import run_generic
-from .validator import to_event_row
+from .validator import to_event_row, to_venue
 
 
 log = structlog.get_logger()
@@ -94,7 +94,6 @@ class PipelineResult:
     extracted: int = 0
     failed: int = 0
     written: int = 0
-    venues_seeded: int = 0
     duplicate_candidates: int = 0
     merged: int = 0
     near_misses: int = 0
@@ -157,7 +156,7 @@ async def run_city(
                 )
             elif mode == "direct_api":
                 rows, sub = await _run_direct_api_source(
-                    client, source, city.slug, provider_keys
+                    client, source, supabase, city.slug, provider_keys, dry_run
                 )
             elif mode == "vk_events":
                 rows, sub = await _run_vk_events_source(
@@ -234,13 +233,6 @@ async def run_city(
             record_source_quality(
                 supabase, city.slug, _source_quality(extracted_by_source, merge.merged_by_source)
             )
-            # Bootstrap venues из events(always) — только если таблица города пуста (recovery).
-            # venues — source of truth; не валим прогон events, если seed не удался.
-            try:
-                vstats = bootstrap_venues_if_empty(supabase, city.slug)
-                result.venues_seeded = vstats.inserted if vstats else 0
-            except Exception as exc:  # noqa: BLE001
-                log.warning("venues.bootstrap.failed", city=city.slug, error=str(exc))
 
     return result
 
@@ -322,13 +314,19 @@ async def _run_per_url_source(
 async def _run_direct_api_source(
     client: httpx.AsyncClient,
     source: SourceConfig,
+    supabase: Client | None,
     city_slug: str,
     provider_keys: dict[str, str | None],
+    dry_run: bool,
 ) -> tuple[list[EventRow], PipelineResult]:
     """API-источник: JSON провайдера → ParsedEvent напрямую, без LLM.
 
     Каждый провайдер возвращает пары (ParsedEvent, source_url) — у 2ГИС это поисковая
     карточка, у Timepad — реальная ссылка на событие.
+
+    Постоянные места (date='always', напр. 2ГИС-боулинг) — это не события, а площадки:
+    их пишем напрямую в таблицу venues (source of truth для фронта), а не в events.
+    Датированные записи (date != 'always') уходят в events как обычно.
     """
     sub = PipelineResult()
 
@@ -353,13 +351,26 @@ async def _run_direct_api_source(
     log.info("direct_api.ok", source=source.name, provider=source.provider, count=len(items))
 
     rows: list[EventRow] = []
+    venues: list[Venue] = []
     for parsed, source_url in items:
         try:
-            rows.append(to_event_row(parsed, city_slug, source_url, source.name))
-            sub.extracted += 1
+            if parsed.date == "always":
+                # source venue-таблицы огрублён до 'twogis' (а не 'twogis-bowling'),
+                # как в db.event_row_to_venue — manual-guard в upsert_venues по нему.
+                venues.append(to_venue(parsed, city_slug, "twogis"))
+            else:
+                rows.append(to_event_row(parsed, city_slug, source_url, source.name))
+                sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
             sub.failed += 1
             log.warning("direct_api.row_invalid", title=parsed.title, error=str(exc))
+
+    if venues:
+        log.info(
+            "pipeline.direct_api.venues_routed", source=source.name, count=len(venues)
+        )
+        if not dry_run and supabase is not None:
+            upsert_venues(supabase, venues)
 
     sub.discovered = len(items)
     sub.new = sub.extracted

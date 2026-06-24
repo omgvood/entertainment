@@ -159,6 +159,11 @@ def sync_venues_from_events(
 def bootstrap_venues_if_empty(client: Client, city: str) -> WriteStats | None:
     """BOOTSTRAP-only: засеять venues из events ТОЛЬКО если для ЭТОГО ГОРОДА нет ни одной строки.
 
+    DEPRECATED (миграция 2026-06): 2ГИС теперь пишет площадки напрямую в venues, а из events
+    удалены все date='always'. sync_venues_from_events читает WHERE date='always' → вернёт пусто.
+    Из пайплайна run вызов убран; функции оставлены для CLI sync-venues до явного удаления.
+
+
     Если у города уже есть площадки — НЕ трогаем (бережём обогащения refresh-venues).
     Проверка per-city: после сбоя perm=27/sochi=0 даст seed только для sochi.
     INSERT-ONLY: даже при ошибочном срабатывании не перетирает существующие строки.
