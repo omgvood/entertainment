@@ -25,7 +25,7 @@ import structlog
 from .config import CityConfig, LlmProvider, Settings, SourceConfig, load_seeds
 from .db import make_client, sync_venues_from_events, upsert_venues
 from .discovery import ListingDiscovery, SitemapDiscovery
-from .extraction import DeepSeekExtractor, GeminiExtractor, GroqExtractor, LLMExtractor
+from .extraction import DeepSeekExtractor, FallbackExtractor, GeminiExtractor, GroqExtractor, LLMExtractor
 from .models import ParsedEvent, Venue
 from .pipeline import run_city
 from .validator import to_venue
@@ -46,6 +46,26 @@ def _make_extractor(settings: Settings, provider: LlmProvider) -> LLMExtractor:
             raise RuntimeError("DEEPSEEK_API_KEY не задан — нужен для provider=deepseek")
         return DeepSeekExtractor(api_key=settings.deepseek_api_key, model=model)
     raise ValueError(f"Неизвестный провайдер: {provider!r}")
+
+
+def _make_extractor_chain(settings: Settings, primary: LlmProvider) -> LLMExtractor:
+    """Цепочка провайдеров для ретрая+фолбэка: primary, затем остальные из
+    settings.llm_fallback_providers, у кого задан ключ. При 429/503 переключаемся дальше."""
+    keys = {
+        "gemini": settings.gemini_api_key,
+        "groq": settings.groq_api_key,
+        "deepseek": settings.deepseek_api_key,
+    }
+    order: list[LlmProvider] = [primary]
+    for p in settings.llm_fallback_providers.split(","):
+        p = p.strip()  # type: ignore[assignment]
+        if p and p in keys and p not in order:
+            order.append(p)  # type: ignore[arg-type]
+
+    providers = [(p, _make_extractor(settings, p)) for p in order if keys.get(p)]
+    if not providers:
+        raise RuntimeError(f"Нет ключа ни для одного провайдера из цепочки {order}")
+    return FallbackExtractor(providers, retry_attempts=settings.llm_retry_attempts)
 
 
 def _setup_logging(level: str = "INFO") -> None:
@@ -310,8 +330,8 @@ async def _cmd_run(args: argparse.Namespace) -> int:
     city = cities[args.city]
 
     provider: LlmProvider = args.provider or settings.llm_provider
-    extractor = _make_extractor(settings, provider)
-    print(f"LLM provider: {provider}, model: {settings.model_for(provider)}", file=sys.stderr)
+    extractor = _make_extractor_chain(settings, provider)
+    print(f"LLM primary: {provider}, model: {settings.model_for(provider)}", file=sys.stderr)
 
     supabase = None if args.dry_run else make_client(
         settings.supabase_url, settings.supabase_service_key
@@ -328,6 +348,7 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         vk_service_key=settings.vk_service_key,
         generic_llm_budget=settings.generic_llm_budget,
         generic_domain_budget=settings.generic_domain_budget,
+        post_batch_size=settings.post_batch_size,
         mode_override=args.mode,
     )
     print(
