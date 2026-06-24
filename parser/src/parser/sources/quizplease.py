@@ -49,8 +49,9 @@ class QuizPleaseClient:
                 if parsed is None:
                     log.warning("quizplease.skipped_game", id=gid, raw_keys=list(game.keys()))
                     continue
-                # URL полей в API нет — fallback на страницу расписания
-                event_url = game.get("url") or schedule_url
+                # В API нет поля url, но есть id (UUID) → собираем ссылку на страницу игры.
+                game_url = f"https://{self._city_slug}.quizplease.ru/game/{gid}" if gid else schedule_url
+                event_url = game.get("url") or game_url
                 results.append((parsed, event_url))
             if page >= total_pages or len(games) < _PER_PAGE:
                 break

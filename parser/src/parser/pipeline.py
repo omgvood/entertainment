@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date as _date, datetime, timezone
-from urllib.parse import urljoin, urlparse
 
 import httpx
 import structlog
@@ -40,37 +40,28 @@ from .models import EventRow, EventType, ParsedEvent, Venue
 from .sources import KudaGoClient, QuizPleaseClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
 from .sources import vk as vk_mod
 from .sources.generic import run_generic
+from .url_utils import resolve_event_url
 from .validator import to_event_row, to_venue
 
 
 log = structlog.get_logger()
 
-# Мусорные значения event_url от LLM/JSON-LD — трактуем как «ссылки нет» (фолбэк на листинг).
-_JUNK_URLS = {"", "#", "javascript:void(0)"}
-# Сокращатели/трекеры, которые LLM ошибочно вытаскивает из тела VK/TG-поста как event_url.
-_JUNK_DOMAINS = {
-    "clck.ru", "vk.cc", "bit.ly", "t.co", "goo.gl",
-    "tinyurl.com", "ow.ly", "is.gd",
-}
+# Параллелизм LLM-вызовов при per-post обработке VK/TG (защита от RPM-лимитов провайдеров).
+_POST_CONCURRENCY = 3
 
 
-def _resolve_event_url(event_url: str | None, base_url: str) -> str:
-    """event_url события → абсолютный source_url. Пусто/мусор → base_url (листинг/группа/канал).
-
-    urljoin сам оставляет абсолютные ссылки как есть и достраивает относительные по base.
-    Голые ссылки-сокращатели из тела поста (clck.ru, vk.cc …) отбрасываем на фолбэк.
-    """
-    url = event_url.strip() if event_url else None
-    if not url or url in _JUNK_URLS:
-        return base_url
-    try:
-        domain = urlparse(url).netloc.lower().lstrip("www.")
-        if domain in _JUNK_DOMAINS:
-            log.debug("event_url.junk_domain", url=url, domain=domain)
-            return base_url
-    except Exception:  # noqa: BLE001 — кривой URL → фолбэк на base
-        return base_url
-    return urljoin(base_url, url)
+async def _extract_post(
+    extractor: LLMExtractor,
+    post_url: str,
+    text: str,
+    sem: asyncio.Semaphore,
+) -> tuple[list[ParsedEvent], str, str]:
+    """Один пост → LLM. Маркер «=== POST <url> ===» сохраняет совместимость с промптами
+    extract_many и закрепляет источник event_url. Семафор ограничивает параллелизм."""
+    async with sem:
+        fake_doc = f"=== POST {post_url} ===\n{text}"
+        events = await extractor.extract_many(fake_doc, post_url)
+        return events, post_url, text
 
 
 def _is_past_event(event_date: str, today_str: str) -> bool:
@@ -475,7 +466,11 @@ async def _run_vk_posts_source(
     vk_service_key: str | None,
     dry_run: bool,
 ) -> tuple[list[EventRow], PipelineResult]:
-    """Посты со стен кураторских VK-сообществ → префильтр → LLM (1 вызов на сообщество)."""
+    """Посты со стен кураторских VK-сообществ → префильтр → LLM (1 вызов на пост).
+
+    source_url события — ссылка на конкретный пост (event_url из тела / фолбэк на post_url),
+    не на группу. Посты обрабатываются параллельно с ограничением _POST_CONCURRENCY.
+    """
     sub = PipelineResult()
     if not vk_service_key:
         log.error("vk_posts.config", source=source.name, reason="нет VK_SERVICE_KEY")
@@ -520,42 +515,42 @@ async def _run_vk_posts_source(
         if not candidates:
             continue
 
-        group_url = f"https://vk.com/{screen}"
-        doc = "\n\n".join(f"=== POST {u} ===\n{t}" for u, t in candidates)
-        try:
-            parsed_events = await extractor.extract_many(doc, group_url)
-        except ExtractorError as exc:
-            log.warning("vk_posts.extract.skipped", group=screen, reason=str(exc))
-            sub.failed += 1
-            continue
-        except Exception as exc:  # noqa: BLE001
-            log.error("vk_posts.extract.failed", group=screen, error=str(exc))
-            sub.failed += 1
-            continue
-
-        # Фиксируем обработанные посты (raw_documents) — следующий неизменный прогон их пропустит.
-        if not dry_run and supabase is not None:
-            for u, t in candidates:
-                save_raw_document(supabase, source.name, u, t, "vk_post")
+        # Per-post: каждый пост — отдельный LLM-вызов, чтобы source_url вёл на сам пост,
+        # а не на группу. Параллелим с семафором (RPM-лимиты), исключения не валят прогон.
+        sem = asyncio.Semaphore(_POST_CONCURRENCY)
+        tasks = [_extract_post(extractor, u, t, sem) for u, t in candidates]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         today_str = _date.today().isoformat()
-        for parsed in parsed_events:
-            try:
-                if _is_past_event(parsed.date, today_str):
-                    log.debug("vk_posts.skip.past", title=parsed.title[:50], date=parsed.date)
-                    continue
-                event_src_url = _resolve_event_url(parsed.event_url, group_url)
-                log.debug(
-                    "vk_posts.event_url",
-                    title=parsed.title[:50],
-                    raw=parsed.event_url,
-                    resolved=event_src_url,
-                )
-                rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
-                sub.extracted += 1
-            except Exception as exc:  # noqa: BLE001
+        for result in results:
+            if isinstance(result, Exception):  # BaseException захватил бы CancelledError
                 sub.failed += 1
-                log.warning("vk_posts.row.invalid", title=parsed.title, error=str(exc))
+                log.error("vk_posts.extract.failed", group=screen, error=str(result), exc_info=result)
+                continue
+            # isinstance+continue выше сужают тип до tuple — распаковка безопасна.
+            post_events, post_url, text = result
+
+            # Фиксируем обработанный пост (raw_documents, upsert по url): неизменный прогон пропустит.
+            if not dry_run and supabase is not None:
+                save_raw_document(supabase, source.name, post_url, text, "vk_post")
+
+            for parsed in post_events:
+                try:
+                    if _is_past_event(parsed.date, today_str):
+                        log.debug("vk_posts.skip.past", title=parsed.title[:50], date=parsed.date)
+                        continue
+                    event_src_url = resolve_event_url(parsed.event_url, post_url)
+                    log.debug(
+                        "vk_posts.event_url",
+                        title=parsed.title[:50],
+                        raw=parsed.event_url,
+                        resolved=event_src_url,
+                    )
+                    rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
+                    sub.extracted += 1
+                except Exception as exc:  # noqa: BLE001
+                    sub.failed += 1
+                    log.warning("vk_posts.row.invalid", title=parsed.title, error=str(exc))
 
     log.info("vk_posts.ok", source=source.name, extracted=sub.extracted)
     sub.new = sub.extracted
@@ -570,12 +565,11 @@ async def _run_telegram_posts_source(
     city_slug: str,
     dry_run: bool,
 ) -> tuple[list[EventRow], PipelineResult]:
-    """Посты публичных Telegram-каналов (t.me/s/) → префильтр → LLM (1 вызов на канал).
+    """Посты публичных Telegram-каналов (t.me/s/) → префильтр → LLM (1 вызов на пост).
 
     Зеркало vk-posts. Строгость префильтра берётся из source_type канала: у агрегаторов
     (много шума) фильтр строже, у организаторов — мягче. source_url события — ссылка на
-    конкретный пост (event_url, который LLM берёт из маркера «=== POST <url> ===»), иначе
-    фолбэк на ссылку канала.
+    конкретный пост (event_url из тела / фолбэк на post_url), не на канал.
     """
     sub = PipelineResult()
     if not source.telegram_sources:
@@ -620,42 +614,41 @@ async def _run_telegram_posts_source(
         if not candidates:
             continue
 
-        channel_url = f"https://t.me/{ch.channel}"
-        doc = "\n\n".join(f"=== POST {u} ===\n{t}" for u, t in candidates)
-        try:
-            parsed_events = await extractor.extract_many(doc, channel_url)
-        except ExtractorError as exc:
-            log.warning("telegram_posts.extract.skipped", channel=ch.channel, reason=str(exc))
-            sub.failed += 1
-            continue
-        except Exception as exc:  # noqa: BLE001
-            log.error("telegram_posts.extract.failed", channel=ch.channel, error=str(exc))
-            sub.failed += 1
-            continue
-
-        # Фиксируем обработанные посты (raw_documents) — следующий неизменный прогон их пропустит.
-        if not dry_run and supabase is not None:
-            for u, t in candidates:
-                save_raw_document(supabase, f"telegram:{ch.channel}", u, t, "telegram_post")
+        # Per-post: см. _run_vk_posts_source — source_url ведёт на сам пост, не на канал.
+        sem = asyncio.Semaphore(_POST_CONCURRENCY)
+        tasks = [_extract_post(extractor, u, t, sem) for u, t in candidates]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         today_str = _date.today().isoformat()
-        for parsed in parsed_events:
-            try:
-                if _is_past_event(parsed.date, today_str):
-                    log.debug("telegram_posts.skip.past", title=parsed.title[:50], date=parsed.date)
-                    continue
-                event_src_url = _resolve_event_url(parsed.event_url, channel_url)
-                log.debug(
-                    "telegram_posts.event_url",
-                    title=parsed.title[:50],
-                    raw=parsed.event_url,
-                    resolved=event_src_url,
-                )
-                rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
-                sub.extracted += 1
-            except Exception as exc:  # noqa: BLE001
+        for result in results:
+            if isinstance(result, Exception):  # BaseException захватил бы CancelledError
                 sub.failed += 1
-                log.warning("telegram_posts.row.invalid", title=parsed.title, error=str(exc))
+                log.error("telegram_posts.extract.failed", channel=ch.channel, error=str(result), exc_info=result)
+                continue
+            # isinstance+continue выше сужают тип до tuple — распаковка безопасна.
+            post_events, post_url, text = result
+
+            # Фиксируем обработанный пост (raw_documents, upsert по url): неизменный прогон пропустит.
+            if not dry_run and supabase is not None:
+                save_raw_document(supabase, f"telegram:{ch.channel}", post_url, text, "telegram_post")
+
+            for parsed in post_events:
+                try:
+                    if _is_past_event(parsed.date, today_str):
+                        log.debug("telegram_posts.skip.past", title=parsed.title[:50], date=parsed.date)
+                        continue
+                    event_src_url = resolve_event_url(parsed.event_url, post_url)
+                    log.debug(
+                        "telegram_posts.event_url",
+                        title=parsed.title[:50],
+                        raw=parsed.event_url,
+                        resolved=event_src_url,
+                    )
+                    rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
+                    sub.extracted += 1
+                except Exception as exc:  # noqa: BLE001
+                    sub.failed += 1
+                    log.warning("telegram_posts.row.invalid", title=parsed.title, error=str(exc))
 
     log.info("telegram_posts.ok", source=source.name, extracted=sub.extracted)
     sub.new = sub.extracted
@@ -759,7 +752,7 @@ async def _run_batch_source(
             if _is_past_event(parsed.date, today_str):
                 log.debug("batch.skip.past", title=parsed.title[:50], date=parsed.date)
                 continue
-            event_src_url = _resolve_event_url(parsed.event_url, source.url)
+            event_src_url = resolve_event_url(parsed.event_url, source.url)
             log.debug(
                 "batch.event_url",
                 title=parsed.title[:50],
