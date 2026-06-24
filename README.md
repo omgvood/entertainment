@@ -1765,11 +1765,37 @@ Supabase Table Editor добавить вручную заведения, кот
 2 первоисточника (`filarmonia.online` JSON-LD, `teatr-teatr.com` LLM) — 37 уникальных событий,
 `unique_events_ratio = 1.0`. Также исправлен баг типизации JSON-LD (`@type → EventType`).
 
-Осталось:
-- **Discovery переведён на Serper/Brave** 🔧 — реализованы `SerperProvider` (основной) и
-  `BraveProvider` (резерв) за ABC `SearchProvider`, цепочка fallback + circuit breaker, метрики
-  и `discovery-health`; cron в `discover_sources.yml` возвращён. Запуск — после добавления
-  `SERPER_API_KEY` в Secrets и проверки качества выдачи на первой неделе.
+**Починка Discovery (PR #1) — сделано** 🔧
+
+Корень проблемы: бесплатный `DuckDuckGoProvider` стал отдавать HTTP 202 (антибот) → 0 кандидатов
+→ `candidate_sources` пустела → generic-парсер оставался без новых доменов. Discovery — первое
+звено цепочки `discover-sources → модерация → generic → frontend`, и его поломка останавливала всё.
+
+Что реализовано за готовым ABC `SearchProvider` (без переписывания остального пайплайна):
+
+- **Keyed-провайдеры** — `SerperProvider` (Google через Serper API, основной) и `BraveProvider`
+  (Brave Search API, резерв). У ABC появилось поле `name` для логов/метрик.
+- **Цепочка с fallback** — `build_search_providers()` строит провайдеров из `SEARCH_PROVIDERS`
+  (через запятую, порядок = приоритет); `_search_with_fallback()` пробует их по очереди и
+  переключается на следующий **только при пустом результате** (не по числу — чтобы запасной не
+  вытеснял релевантную выдачу основного). DuckDuckGo остаётся последним резервом.
+- **Circuit breaker** — 401/403 (битый ключ) или 3 подряд 5xx/сетевых отказа отключают провайдер
+  до конца прогона; 429 (rate limit) обрабатывается мягко (без отключения). Битый JSON не валит
+  прогон. Защита квоты — `SEARCH_QUERY_LIMIT`.
+- **Наблюдаемость** — метрики `candidate.search.stats` / `candidate.discovered` /
+  `candidate.provider.summary` (вклад провайдеров, avg_score, score≥7) / `candidate.search.cost`;
+  сигналы деградации `candidate.discovery_empty` и `candidate.discovery_no_new`. Новая колонка
+  `candidate_sources.first_provider` / `first_query` (миграция `20260621000001`) + CLI-команда
+  `discovery-health` (exit 1 при 0 новых кандидатов за неделю), вызываемая шагом в workflow.
+- **CI** — cron в `discover_sources.yml` возвращён; в env добавлены `SERPER_API_KEY` / `BRAVE_API_KEY`
+  / `SEARCH_PROVIDERS`. Тесты — `tests/test_candidate_sources.py` (провайдеры, circuit breaker,
+  fallback, фабрика, `first_provider`) на `httpx.MockTransport`, без сети.
+
+**Осталось:**
+- **Добавить `SERPER_API_KEY` в Secrets и включить** 📋 — получить ключ на serper.dev (2500
+  запросов/мес бесплатно), положить в GitHub Secrets (env «Production»), применить миграцию
+  `20260621000001` в Supabase, прогнать `discover-sources --city perm` и проверить качество выдачи
+  за первую неделю (`discovery-health`, разбивка `first_provider`).
 - **Полуавтоматическая модерация кандидатов** 📋 — следующий шаг (PR #2): auto-approve по
   семантическим признакам (`has_jsonld_event` + event-path + ≥3 запроса), чтобы ручная модерация
   не стала новым узким местом после восстановления потока кандидатов.

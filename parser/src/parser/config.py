@@ -39,6 +39,16 @@ class Settings:
     """Нужен если в seeds.yaml есть direct_api источники с provider=timepad."""
     vk_service_key: Optional[str] = None
     """Сервисный ключ VK mini-app. Нужен для источников vk-events / vk-posts."""
+    search_providers: str = "serper"
+    """Поисковики Discovery через запятую, порядок = приоритет: 'serper,brave,duckduckgo'."""
+    serper_api_key: Optional[str] = None
+    """Ключ Serper API (google.serper.dev). Основной провайдер discover-sources."""
+    brave_api_key: Optional[str] = None
+    """Ключ Brave Search API. Резервный провайдер discover-sources."""
+    search_timeout_seconds: float = 20.0
+    """Таймаут HTTP-запроса к поисковику в discover-sources."""
+    search_query_limit: Optional[int] = None
+    """Лимит числа поисковых запросов за прогон (защита квоты). None = по числу шаблонов."""
     generic_llm_budget: int = 10
     """Макс. число LLM-вызовов на прогон в generic-источнике (защита расходов)."""
     generic_domain_budget: int = 20
@@ -96,6 +106,15 @@ class Settings:
             twogis_api_key=os.environ.get("TWOGIS_API_KEY"),
             timepad_token=os.environ.get("TIMEPAD_TOKEN"),
             vk_service_key=os.environ.get("VK_SERVICE_KEY"),
+            search_providers=os.environ.get("SEARCH_PROVIDERS", "serper"),
+            serper_api_key=os.environ.get("SERPER_API_KEY"),
+            brave_api_key=os.environ.get("BRAVE_API_KEY"),
+            search_timeout_seconds=float(os.environ.get("SEARCH_TIMEOUT_SECONDS", "20")),
+            search_query_limit=(
+                int(os.environ["SEARCH_QUERY_LIMIT"])
+                if os.environ.get("SEARCH_QUERY_LIMIT")
+                else None
+            ),
             generic_llm_budget=int(os.environ.get("GENERIC_LLM_BUDGET", "10")),
             generic_domain_budget=int(os.environ.get("GENERIC_DOMAIN_BUDGET", "20")),
             post_batch_size=int(os.environ.get("POST_BATCH_SIZE", "5")),
