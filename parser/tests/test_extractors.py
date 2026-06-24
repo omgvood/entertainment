@@ -7,7 +7,34 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from parser.extraction import DeepSeekExtractor
+from parser.extraction._errors import is_rate_limit
 from parser.models import ParsedEvent
+
+
+def test_is_rate_limit_by_status_code():
+    # groq/openai APIStatusError несёт .status_code
+    e = Exception("rate")
+    e.status_code = 429  # type: ignore[attr-defined]
+    assert is_rate_limit(e) is True
+
+
+def test_is_rate_limit_by_code():
+    # google.genai.errors.APIError несёт .code
+    e = Exception("server")
+    e.code = 503  # type: ignore[attr-defined]
+    assert is_rate_limit(e) is True
+
+
+def test_is_rate_limit_by_substring():
+    assert is_rate_limit(Exception("RESOURCE_EXHAUSTED for project")) is True
+    assert is_rate_limit(Exception("model is overloaded, try later")) is True
+    assert is_rate_limit(Exception("503 UNAVAILABLE")) is True
+
+
+def test_is_rate_limit_false_for_content_error():
+    e = Exception("invalid JSON: unexpected token")
+    e.status_code = 400  # type: ignore[attr-defined]
+    assert is_rate_limit(e) is False
 
 
 _SAMPLE_EVENT_JSON = {

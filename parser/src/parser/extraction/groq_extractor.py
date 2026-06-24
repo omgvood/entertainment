@@ -22,7 +22,8 @@ from markdownify import markdownify
 from selectolax.parser import HTMLParser
 
 from ..models import ParsedEvent
-from .base import ExtractorError, LLMExtractor
+from ._errors import is_rate_limit
+from .base import ExtractorError, LLMExtractor, RateLimitError
 
 
 log = structlog.get_logger()
@@ -131,6 +132,8 @@ class GroqExtractor(LLMExtractor):
                 max_tokens=2000,
             )
         except Exception as exc:  # noqa: BLE001
+            if is_rate_limit(exc):
+                raise RateLimitError(f"Groq rate-limit для {source_url}: {exc}") from exc
             raise ExtractorError(f"Groq API error для {source_url}: {exc}") from exc
 
         text = response.choices[0].message.content if response.choices else None
@@ -185,6 +188,8 @@ class GroqExtractor(LLMExtractor):
                 max_tokens=8000,
             )
         except Exception as exc:  # noqa: BLE001
+            if is_rate_limit(exc):
+                raise RateLimitError(f"Groq rate-limit для {source_url}: {exc}") from exc
             raise ExtractorError(f"Groq API error для {source_url}: {exc}") from exc
 
         text = response.choices[0].message.content if response.choices else None
@@ -194,6 +199,7 @@ class GroqExtractor(LLMExtractor):
         try:
             data: Any = json.loads(text)
         except json.JSONDecodeError as exc:
+            log.debug("extract.bad_response", provider="groq", raw=str(text)[:1000])
             raise ExtractorError(
                 f"Groq вернул не-JSON для {source_url}: {text[:200]!r}"
             ) from exc

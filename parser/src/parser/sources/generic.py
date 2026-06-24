@@ -20,6 +20,7 @@ from supabase import Client
 from ..extraction import ExtractorError, LLMExtractor, extract_jsonld_events
 from ..models import EventRow, ParsedEvent
 from ..db import get_raw_document_hash, record_source_health, save_raw_document
+from ..url_utils import resolve_event_url
 from ..validator import to_event_row
 
 
@@ -206,7 +207,9 @@ async def _run_domain(
     errors = 0
     for p in parsed:
         try:
-            rows.append(to_event_row(p, city_slug, listing_url, f"generic:{domain}"))
+            # source_url = ссылка на само событие (event_url из JSON-LD/LLM), иначе листинг.
+            src_url = resolve_event_url(p.event_url, listing_url)
+            rows.append(to_event_row(p, city_slug, src_url, f"generic:{domain}"))
         except Exception as exc:  # noqa: BLE001
             errors += 1
             log.warning("generic.row.invalid", domain=domain, title=p.title, error=str(exc))

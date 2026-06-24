@@ -15,7 +15,8 @@ from google.genai import types
 from selectolax.parser import HTMLParser
 
 from ..models import ParsedEvent
-from .base import ExtractorError, LLMExtractor
+from ._errors import is_rate_limit
+from .base import ExtractorError, LLMExtractor, RateLimitError
 
 
 log = structlog.get_logger()
@@ -111,6 +112,8 @@ class GeminiExtractor(LLMExtractor):
                 ),
             )
         except Exception as exc:  # noqa: BLE001
+            if is_rate_limit(exc):
+                raise RateLimitError(f"Gemini rate-limit для {source_url}: {exc}") from exc
             raise ExtractorError(f"Gemini API error для {source_url}: {exc}") from exc
 
         if not response.text:
@@ -122,6 +125,7 @@ class GeminiExtractor(LLMExtractor):
         try:
             data = json.loads(response.text)
         except json.JSONDecodeError as exc:
+            log.debug("extract.bad_response", provider="gemini", raw=str(response.text)[:1000])
             raise ExtractorError(
                 f"Gemini вернул не-JSON для {source_url}: {response.text[:200]!r}"
             ) from exc
@@ -169,6 +173,8 @@ class GeminiExtractor(LLMExtractor):
                 ),
             )
         except Exception as exc:  # noqa: BLE001
+            if is_rate_limit(exc):
+                raise RateLimitError(f"Gemini rate-limit для {source_url}: {exc}") from exc
             raise ExtractorError(f"Gemini API error для {source_url}: {exc}") from exc
 
         if not response.text:
@@ -180,6 +186,7 @@ class GeminiExtractor(LLMExtractor):
         try:
             data = json.loads(response.text)
         except json.JSONDecodeError as exc:
+            log.debug("extract.bad_response", provider="gemini", raw=str(response.text)[:1000])
             raise ExtractorError(
                 f"Gemini вернул не-JSON для {source_url}: {response.text[:200]!r}"
             ) from exc

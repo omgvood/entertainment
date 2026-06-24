@@ -43,7 +43,14 @@ class Settings:
     """Макс. число LLM-вызовов на прогон в generic-источнике (защита расходов)."""
     generic_domain_budget: int = 20
     """Макс. число доменов на прогон в generic-источнике (защита времени прогона)."""
+    post_batch_size: int = 5
+    """Сколько VK/TG-постов склеивать в один LLM-вызов (баланс квоты и точности атрибуции)."""
     llm_provider: LlmProvider = "gemini"
+    llm_fallback_providers: str = "gemini,groq"
+    """Цепочка провайдеров через запятую (порядок = приоритет). При 429/503 переключаемся на
+    следующего из тех, у кого есть ключ. deepseek по умолчанию не включён (OpenRouter 402)."""
+    llm_retry_attempts: int = 3
+    """Число попыток на провайдера при rate-limit (429/503) перед переходом к следующему."""
     gemini_model: Optional[str] = None
     """Override от env GEMINI_MODEL. Если None — DEFAULT_MODELS['gemini']."""
     groq_model: Optional[str] = None
@@ -91,7 +98,10 @@ class Settings:
             vk_service_key=os.environ.get("VK_SERVICE_KEY"),
             generic_llm_budget=int(os.environ.get("GENERIC_LLM_BUDGET", "10")),
             generic_domain_budget=int(os.environ.get("GENERIC_DOMAIN_BUDGET", "20")),
+            post_batch_size=int(os.environ.get("POST_BATCH_SIZE", "5")),
             llm_provider=provider_raw,  # type: ignore[arg-type]
+            llm_fallback_providers=os.environ.get("LLM_FALLBACK_PROVIDERS", "gemini,groq"),
+            llm_retry_attempts=int(os.environ.get("LLM_RETRY_ATTEMPTS", "3")),
             gemini_model=os.environ.get("GEMINI_MODEL"),
             groq_model=os.environ.get("GROQ_MODEL"),
             deepseek_model=os.environ.get("DEEPSEEK_MODEL"),
