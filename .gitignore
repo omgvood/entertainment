@@ -24,8 +24,8 @@ Thumbs.db
 
 # Локальные данные и черновики (не для репозитория)
 input-output/
-C:\Python\entertainment\input-output
+docs/
 
 # Отладочные скрипты и дампы HTML (локальная диагностика парсера)
-debug_parse_2gis.py
-debug_2gis.html
+#debug_parse_2gis.py
+#debug_2gis.html
