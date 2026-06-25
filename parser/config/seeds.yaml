@@ -14,6 +14,8 @@
 #   telegram_posts  — посты публичных каналов (t.me/s/) → префильтр → LLM extract_many (1 вызов/канал)
 #                     требует: telegram_sources (список каналов; без авторизации)
 #   generic         — одобренные в candidate_sources домены → JSON-LD / LLM (длинный хвост)
+#   playwright_listing — как batch_listing, но url рендерится headless-браузером (Playwright)
+#                     требует: url + event_type. Для SPA (Nuxt/Next/React) — httpx видит пустой скелет
 #
 # priority — приоритет при кросс-источниковом merge (выше = побеждает, его карточка остаётся).
 
@@ -218,6 +220,23 @@ cities:
       - name: generic
         extraction_mode: generic
         priority: 20
+
+      # SPA-сайты (Nuxt) — рендер headless-браузером (Playwright), затем JSON-LD → LLM.
+      # Статический HTML у них пуст (httpx видит скелет), поэтому batch_listing не годится.
+      # event_type — дефолт для JSON-LD, когда Schema.org @type не уточняет тип события.
+      # priority 55: выше vk-posts/40 и generic/20, ниже quizplease/60 (первоисточник
+      # организатора ценнее агрегаторских постов, но не перебивает профильный API).
+      - name: permopera
+        extraction_mode: playwright_listing
+        url: https://www.permopera.ru/afisha/
+        event_type: concert
+        priority: 55
+
+      - name: permm
+        extraction_mode: playwright_listing
+        url: https://permm.ru/afisha
+        event_type: exhibition
+        priority: 55
 
       # DeepSeek тестовый источник (раскомментировать для локального тестирования)
       # - name: quizplease-deepseek-test

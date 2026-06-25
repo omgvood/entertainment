@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -55,6 +56,33 @@ def _chunks(seq: list, size: int):
     """Разбивает список на пачки по size элементов."""
     for i in range(0, len(seq), size):
         yield seq[i : i + size]
+
+
+def _hash_html(html: str, *, playwright: bool = False) -> str:
+    """SHA-256 контента листинга для дедупа неизменных прогонов (raw_documents).
+
+    Для статических страниц (playwright=False) хешируем сырой HTML — он стабилен между
+    прогонами. Для SPA (playwright=True) — нельзя: Nuxt/Next встраивают в DOM динамические
+    блоки (`<script id="__NUXT_DATA__">` с токенами/таймстампами, рандомизированные классы
+    гидратации), и хеш сырого HTML «мигал» бы каждый прогон → лишние LLM-вызовы. Поэтому
+    структурно вычищаем не-контентные теги через selectolax и хешируем только нормализованный
+    видимый текст: он меняется ровно тогда, когда меняется состав афиши.
+    """
+    if not playwright:
+        return hashlib.sha256(html.encode("utf-8")).hexdigest()
+
+    from selectolax.parser import HTMLParser
+
+    tree = HTMLParser(html)
+    for tag in tree.css("script, style, meta, link, input[type='hidden'], template"):
+        tag.decompose()
+    body = tree.body
+    if body is not None:
+        text = body.text(deep=True, strip=True)
+        text = re.sub(r"\s+", " ", text).strip()
+    else:
+        text = html
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 async def _extract_chunk(
@@ -164,6 +192,11 @@ async def run_city(
             if mode == "batch_listing":
                 rows, sub = await _run_batch_source(
                     client, source, extractor, supabase, city.slug, dry_run
+                )
+            elif mode == "playwright_listing":
+                rows, sub = await _run_batch_source(
+                    client, source, extractor, supabase, city.slug, dry_run,
+                    use_playwright=True,
                 )
             elif mode == "direct_api":
                 rows, sub = await _run_direct_api_source(
@@ -732,21 +765,34 @@ async def _run_batch_source(
     supabase: Client | None,
     city_slug: str,
     dry_run: bool,
+    *,
+    use_playwright: bool = False,
 ) -> tuple[list[EventRow], PipelineResult]:
-    """Скачиваем listing URL целиком. JSON-LD → (фолбэк) один LLM-вызов на все события."""
+    """Скачиваем listing URL целиком. JSON-LD → (фолбэк) один LLM-вызов на все события.
+
+    use_playwright=True — страница рендерится headless-браузером (режим playwright_listing)
+    для SPA, где httpx видит пустой скелет. Дальнейшая обработка идентична batch_listing.
+    """
     sub = PipelineResult()
 
-    # 1. Один fetch listing-страницы
+    # 1. Один fetch listing-страницы (httpx для статики, Playwright для SPA)
     try:
-        resp = await client.get(source.url, follow_redirects=True, timeout=20.0)
-        resp.raise_for_status()
+        if use_playwright:
+            from .sources.playwright_fetcher import render_page
+
+            html = await render_page(source.url)
+        else:
+            resp = await client.get(source.url, follow_redirects=True, timeout=20.0)
+            resp.raise_for_status()
+            html = resp.text
     except Exception as exc:  # noqa: BLE001
         log.error("batch.fetch.failed", source=source.name, error=str(exc))
         return [], sub
 
     # 2. Дедуп по хешу контента: если листинг не менялся — не зовём LLM/JSON-LD.
     # Хеш хранится в raw_documents (по url) — там же лежит само сырьё для перепарса.
-    content_hash = hashlib.sha256(resp.text.encode("utf-8")).hexdigest()
+    # Для SPA хешируем только видимый текст (см. _hash_html): сырой DOM нестабилен.
+    content_hash = _hash_html(html, playwright=use_playwright)
     if not dry_run and supabase is not None:
         if get_raw_document_hash(supabase, source.url) == content_hash:
             log.info("batch.skip.unchanged", source=source.name, url=source.url)
@@ -756,7 +802,7 @@ async def _run_batch_source(
     parsed_events: list[ParsedEvent] = []
     if source.event_type:
         try:
-            parsed_events = extract_jsonld_events(resp.text, source.event_type)  # type: ignore[arg-type]
+            parsed_events = extract_jsonld_events(html, source.event_type)  # type: ignore[arg-type]
         except Exception as exc:  # noqa: BLE001
             log.warning("jsonld.failed", source=source.name, error=str(exc))
         if parsed_events:
@@ -767,7 +813,7 @@ async def _run_batch_source(
     # 4. Фолбэк на LLM, если JSON-LD ничего не дал.
     if not parsed_events:
         try:
-            parsed_events = await extractor.extract_many(resp.text, source.url)
+            parsed_events = await extractor.extract_many(html, source.url)
         except ExtractorError as exc:
             log.warning("batch.extract.skipped", source=source.name, reason=str(exc))
             sub.failed = 1
@@ -788,7 +834,7 @@ async def _run_batch_source(
     # неизменный прогон пропустим, а сырьё можно перепарсить новым промптом/моделью.
     if not dry_run and supabase is not None:
         save_raw_document(
-            supabase, source.name, source.url, resp.text, "html", content_hash
+            supabase, source.name, source.url, html, "html", content_hash
         )
 
     # 3. Маппинг в EventRow. source_url = прямая ссылка на событие (event_url из JSON-LD/LLM,

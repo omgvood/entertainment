@@ -34,7 +34,18 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e '.[playwright]'
+
+      # Кэшируем бинарники Chromium: переустановка только при смене версии playwright
+      # в pyproject.toml, а не каждый дейли прогон (иначе +2 мин на скачивание).
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('parser/pyproject.toml') }}
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
 
       - name: Run parser — ${{ matrix.city }}
         env:
