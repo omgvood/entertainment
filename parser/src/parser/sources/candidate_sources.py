@@ -47,6 +47,26 @@ _IGNORE_DOMAINS = {
     "duckduckgo.com", "wikipedia.org", "2gis.ru", "avito.ru",
 }
 
+# Сила штрафа Discovery для агрегаторов. Именованная константа — изменение однострочное.
+# Не меньше суммы двух сильнейших структурных бонусов (JSON-LD +3, event-path +2 = 5),
+# иначе хорошо размеченный агрегатор обгонит локального организатора с теми же сигналами.
+_AGGREGATOR_PENALTY = 5
+
+# Федеральные агрегаторы и билетные платформы. В отличие от _IGNORE_DOMAINS, НЕ исключаются
+# из обработки — остаются кандидатами, но с пониженным скором (виден в discovery-health и
+# при модерации). Домены добавляются вручную по факту появления в Discovery-логах
+# (candidate.aggregator_penalty), если:
+#   1. являются федеральными агрегаторами (не первоисточниками событий);
+#   2. регулярно появляются в Discovery и занимают место локальных организаторов.
+# timepad.ru здесь временно: _known_domains() не ловит direct_api без url в seeds.
+# После внедрения SourceConfig.domain должен уйти из этого списка.
+_AGGREGATOR_PENALTY_DOMAINS = {
+    "afisha.ru",
+    "ticketland.ru",
+    "kassir.ru",
+    "timepad.ru",
+}
+
 _JSONLD_EVENT_RE = re.compile(r'"@type"\s*:\s*"[^"]*Event"')
 
 # Известные провайдеры (валидация SEARCH_PROVIDERS).
@@ -403,6 +423,23 @@ async def _score_candidate(client: httpx.AsyncClient, cand: Candidate) -> None:
                 cand.score += 3
         except Exception:  # noqa: BLE001
             pass
+
+    # Штраф агрегаторам — применяется ПОСЛЕДНИМ, после всех начислений: иначе любой бонус,
+    # добавленный выше в будущем, нивелирует эффект. endswith ловит поддомены (perm.afisha.ru),
+    # без ложных совпадений (myafisha.ru не оканчивается на .afisha.ru).
+    if any(
+        cand.domain == d or cand.domain.endswith("." + d)
+        for d in _AGGREGATOR_PENALTY_DOMAINS
+    ):
+        score_before = cand.score
+        cand.score -= _AGGREGATOR_PENALTY
+        log.info(
+            "candidate.aggregator_penalty",
+            domain=cand.domain,
+            score_before=score_before,
+            score_after=cand.score,
+            penalty=_AGGREGATOR_PENALTY,
+        )
 
 
 def save_candidates(client: Client, candidates: list[Candidate]) -> int:
