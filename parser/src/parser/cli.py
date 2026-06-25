@@ -482,6 +482,7 @@ def main() -> int:
         choices=[
             "per_url", "batch_listing", "direct_api",
             "vk_events", "vk_posts", "telegram_posts", "generic",
+            "playwright_listing",
         ],
         default=None,
         help="Override extraction_mode из seeds.yaml (для разовых тестов)",

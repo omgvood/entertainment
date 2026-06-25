@@ -132,6 +132,7 @@ DiscoveryKind = Literal["sitemap", "listing"]
 ExtractionMode = Literal[
     "per_url", "batch_listing", "direct_api",
     "vk_events", "vk_posts", "telegram_posts", "generic",
+    "playwright_listing",  # batch_listing, но fetch через Playwright (Nuxt/React/Vue SPA)
 ]
 
 
@@ -217,6 +218,8 @@ class SourceConfig:
     vk_posts:       посты со стен vk_groups → префильтр → LLM extract_many (1 вызов на группу).
     telegram_posts: посты публичных каналов (t.me/s/) → префильтр → LLM extract_many (1 вызов/канал).
     generic:        одобренные в candidate_sources домены → JSON-LD / LLM (длинный хвост).
+    playwright_listing: то же что batch_listing, но страница рендерится headless-браузером
+                    (Playwright) — для SPA на Nuxt/Next/React, где httpx видит пустой скелет.
     """
 
 
