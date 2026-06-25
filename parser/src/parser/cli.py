@@ -123,13 +123,16 @@ async def _cmd_discover_sources(args: argparse.Namespace) -> int:
     """Поиск новых источников → candidate_sources (Discovery). Раз в неделю."""
     from .sources.candidate_sources import discover_sources
 
-    supabase = None
-    if not args.dry_run:
-        settings = Settings.from_env()
-        _setup_logging(settings.log_level)
-        supabase = make_client(settings.supabase_url, settings.supabase_service_key)
+    # settings нужны всегда — в них ключи поисковиков (Serper/Brave), даже для dry-run.
+    settings = Settings.from_env()
+    _setup_logging(settings.log_level)
+    supabase = None if args.dry_run else make_client(
+        settings.supabase_url, settings.supabase_service_key
+    )
 
-    candidates = await discover_sources(args.city, supabase, dry_run=args.dry_run)
+    candidates = await discover_sources(
+        args.city, supabase, settings=settings, dry_run=args.dry_run
+    )
 
     print(f"\nКандидаты для {args.city} (по убыванию score):")
     for c in candidates[:30]:
@@ -138,6 +141,54 @@ async def _cmd_discover_sources(args: argparse.Namespace) -> int:
     print(f"\nВсего кандидатов: {len(candidates)}"
           f"{' (dry-run, не сохранено)' if args.dry_run else ''}")
     return 0
+
+
+def _cmd_discovery_health(args: argparse.Namespace) -> int:
+    """Здоровье Discovery: сколько новых кандидатов за период, разбивка по провайдерам.
+
+    Считаем по found_at (момент обнаружения), а не по обновлению записи — иначе старый
+    кандидат, переподтверждённый last_seen, ложно засчитался бы как новый.
+    Exit code 1, если за период не появилось ни одного нового кандидата.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    settings = Settings.from_env()
+    _setup_logging(settings.log_level)
+    supabase = make_client(settings.supabase_url, settings.supabase_service_key)
+
+    since = (datetime.now(timezone.utc) - timedelta(days=args.days)).isoformat()
+    rows = (
+        supabase.table("candidate_sources")
+        .select("first_provider,status,score")
+        .eq("city", args.city)
+        .gte("found_at", since)
+        .execute()
+        .data
+    ) or []
+
+    by_provider: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    for r in rows:
+        prov = r.get("first_provider") or "?"
+        status = r.get("status") or "?"
+        by_provider[prov] = by_provider.get(prov, 0) + 1
+        by_status[status] = by_status.get(status, 0) + 1
+
+    print(f"Discovery health — {args.city}, последние {args.days} дн.:")
+    print(f"  Новых кандидатов: {len(rows)}")
+    print(f"  По провайдерам: {by_provider or '—'}")
+    print(f"  По статусам: {by_status or '—'}")
+    if rows:
+        avg = sum(r.get("score") or 0 for r in rows) / len(rows)
+        print(f"  Средний score: {avg:.1f}")
+        return 0
+
+    print(
+        f"  ⚠️ За {args.days} дн. не появилось ни одного нового кандидата — "
+        "проверь провайдеры поиска и ключи (SERPER_API_KEY).",
+        file=sys.stderr,
+    )
+    return 1
 
 
 _VENUE_COLUMNS = (
@@ -378,6 +429,10 @@ def main() -> int:
         help="Не писать в candidate_sources, только вывести кандидатов",
     )
 
+    p_dh = sub.add_parser("discovery-health", help="Здоровье Discovery: новые кандидаты за период")
+    p_dh.add_argument("--city", required=True)
+    p_dh.add_argument("--days", type=int, default=7, help="Окно в днях (по умолчанию 7)")
+
     p_ev = sub.add_parser("export-venues", help="Снимок venues → SQL-файл (бекап в git)")
     p_ev.add_argument("--city", help="Только один город (опц.)")
     p_ev.add_argument(
@@ -438,6 +493,8 @@ def main() -> int:
         return asyncio.run(_cmd_discover(args))
     if args.cmd == "discover-sources":
         return asyncio.run(_cmd_discover_sources(args))
+    if args.cmd == "discovery-health":
+        return _cmd_discovery_health(args)
     if args.cmd == "export-venues":
         return _cmd_export_venues(args)
     if args.cmd == "refresh-venues":

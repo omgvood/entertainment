@@ -2,11 +2,8 @@ name: Discover sources
 
 # Еженедельный поиск новых источников (Discovery). Воскресенье 20:00 UTC = 23:00 МСК.
 on:
-  # ВРЕМЕННО ОТКЛЮЧЁН на период эксперимента с generic-парсером (Пермь):
-  # чтобы новые `new`-кандидаты не зашумляли таблицу candidate_sources и метрики
-  # первой недели. Вернуть cron после фиксации базовой линии (см. план generic).
-  # schedule:
-  #   - cron: "0 20 * * 0"
+  schedule:
+    - cron: "0 20 * * 0"
   workflow_dispatch:  # ручной запуск из UI
 
 jobs:
@@ -41,4 +38,15 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          SEARCH_PROVIDERS: serper,brave,duckduckgo
         run: python -m parser.cli discover-sources --city ${{ matrix.city }}
+
+      - name: Discovery health check — ${{ matrix.city }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        # Не валим весь прогон, если кандидатов 0 — только предупреждение в логах.
+        continue-on-error: true
+        run: python -m parser.cli discovery-health --city ${{ matrix.city }}
