@@ -10,7 +10,7 @@ import hashlib
 import re
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date as _date, datetime, timezone
 
 import httpx
@@ -132,14 +132,9 @@ class PipelineResult:
     duplicate_candidates: int = 0
     merged: int = 0
     near_misses: int = 0
-    merged_by_source: dict = None  # type: ignore[assignment]
-    warnings: list[str] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.merged_by_source is None:
-            self.merged_by_source = {}
-        if self.warnings is None:
-            self.warnings = []
+    merged_by_source: dict = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    source_quality: dict[str, dict] = field(default_factory=dict)
 
 
 def _make_discovery(client: httpx.AsyncClient, source: SourceConfig):
@@ -277,29 +272,54 @@ async def run_city(
             cleanup_old_events(supabase, city.slug)
             cleanup_old_raw_documents(supabase)
             record_coverage(supabase, city.slug)
-            record_source_quality(
-                supabase, city.slug, _source_quality(extracted_by_source, merge.merged_by_source)
+
+        # Качество источников считаем всегда (в т.ч. dry-run) — нужно для вывода в CLI.
+        sq = _source_quality(extracted_by_source, merge.merged_by_source)
+        result.source_quality = sq
+
+        if sq:
+            ratios = [v["ratio"] for v in sq.values() if v["ratio"] is not None]
+            avg_ratio = sum(ratios) / len(ratios) if ratios else 0
+            log.info(
+                "source_quality.summary",
+                city=city.slug,
+                total_sources=len(sq),
+                avg_unique_ratio=round(avg_ratio, 3),
             )
+
+        for src, m in sq.items():
+            if m["ratio"] is not None and m["ratio"] < 0.3 and m["found"] >= 5:
+                result.warnings.append(
+                    f"{src}: low unique ratio {m['ratio']:.0%} "
+                    f"(found={m['found']}) — сильный дубль, рассмотрите отключение"
+                )
+
+        if not dry_run and supabase is not None:
+            record_source_quality(supabase, city.slug, sq)
 
     return result
 
 
 def _source_quality(
     extracted_by_source: Counter, merged_by_source: dict[str, int]
-) -> dict[str, tuple[int, int]]:
-    """{source: (events_found, unique_events)} для record_source_quality.
+) -> dict[str, dict]:
+    """{source: {found, unique, ratio}} для record_source_quality и PipelineResult.
 
     unique = извлечено − проиграно кросс-источниковому merge. merged_by_source — ключи
     вида 'loser→winner' (см. merge.py), считаем потери по источнику-проигравшему.
+    Структура расширяема (в будущем — priority, new_unique, downgraded и т.д.).
     """
     losses: Counter = Counter()
     for key, cnt in merged_by_source.items():
-        loser = key.split("→", 1)[0]
-        losses[loser] += cnt
-    return {
-        source: (found, found - losses.get(source, 0))
-        for source, found in extracted_by_source.items()
-    }
+        if "→" in key:
+            loser = key.split("→", 1)[0].strip()
+            losses[loser] += cnt
+    result: dict[str, dict] = {}
+    for source, found in extracted_by_source.items():
+        unique = found - losses.get(source, 0)
+        ratio = round(unique / found, 3) if found > 0 else None
+        result[source] = {"found": found, "unique": unique, "ratio": ratio}
+    return result
 
 
 async def _run_per_url_source(
