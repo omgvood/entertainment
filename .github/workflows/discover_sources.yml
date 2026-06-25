@@ -47,6 +47,18 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        # Не валим весь прогон, если кандидатов 0 — только предупреждение в логах.
-        continue-on-error: true
+        # Падаем (exit 1), если за 7 дней не появилось ни одного нового кандидата — медленная
+        # деградация поиска. Быстрый сбой ключей ловит exit 1 шага discover-sources выше.
         run: python -m parser.cli discovery-health --city ${{ matrix.city }}
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
+            curl -s "https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage" \
+              -d chat_id="$TG_CHAT_ID" \
+              -d text="⚠️ Discovery (${{ matrix.city }}) — провайдеры поиска не дали кандидатов. Проверь SERPER_API_KEY / BRAVE_API_KEY. Логи: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

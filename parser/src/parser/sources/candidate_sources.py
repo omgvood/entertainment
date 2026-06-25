@@ -453,8 +453,14 @@ async def discover_sources(
     *,
     settings: Settings | None = None,
     dry_run: bool = False,
-) -> list[Candidate]:
-    """Главная точка входа CLI-команды discover-sources."""
+) -> tuple[list[Candidate], bool]:
+    """Главная точка входа CLI-команды discover-sources.
+
+    Возвращает (кандидаты, all_providers_failed). Второй флаг = все keyed-провайдеры
+    (Serper/Brave) отключились из-за 401/403/повторных отказов — сигнал «ключи API битые».
+    DuckDuckGo (без ключа, сломан с 2026-06) в расчёт не берём: его наличие в цепочке не
+    должно подавлять сигнал о протухших ключах.
+    """
     if settings is None:
         settings = Settings.from_env()
 
@@ -469,6 +475,10 @@ async def discover_sources(
         candidates = await collect_candidates(
             providers, client, city_slug, skip, query_limit=settings.search_query_limit
         )
+        # Только keyed-провайдеры умеют помечать себя _disabled. all([]) == True, поэтому
+        # явно требуем непустой список — пустой keyed (только DDG) не считаем провалом авторизации.
+        keyed = [p for p in providers if hasattr(p, "_disabled")]
+        all_providers_failed = bool(keyed) and all(p._disabled for p in keyed)
 
     if not candidates:
         log.error("candidate.discovery_empty", city=city_slug,
@@ -481,4 +491,4 @@ async def discover_sources(
             log.warning("candidate.discovery_no_new", city=city_slug,
                         msg="кандидаты найдены, но новых нет (все уже в БД)")
 
-    return candidates
+    return candidates, all_providers_failed

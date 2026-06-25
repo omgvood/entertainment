@@ -130,7 +130,7 @@ async def _cmd_discover_sources(args: argparse.Namespace) -> int:
         settings.supabase_url, settings.supabase_service_key
     )
 
-    candidates = await discover_sources(
+    candidates, all_providers_failed = await discover_sources(
         args.city, supabase, settings=settings, dry_run=args.dry_run
     )
 
@@ -140,6 +140,16 @@ async def _cmd_discover_sources(args: argparse.Namespace) -> int:
         print(f"  {c.score:>3}  {c.domain}{flag}  (запросов: {len(c.queries)})")
     print(f"\nВсего кандидатов: {len(candidates)}"
           f"{' (dry-run, не сохранено)' if args.dry_run else ''}")
+
+    # Падаем (exit 1) только при провале авторизации провайдеров — это разбудит
+    # «Notify on failure» в GHA сразу, не дожидаясь 7 дней до discovery-health.
+    # Пустой список кандидатов при живых ключах (узкая ниша) — НЕ ошибка.
+    if all_providers_failed and not args.dry_run:
+        print(
+            "  ⚠️ все keyed-провайдеры (Serper/Brave) отключены — проверь SERPER_API_KEY / BRAVE_API_KEY",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -410,6 +420,26 @@ async def _cmd_run(args: argparse.Namespace) -> int:
     )
     if result.merged_by_source:
         print(f"  merge по источникам: {result.merged_by_source}")
+
+    # Предупреждения (напр. протухший токен Timepad) пишем в файл — GHA читает его и
+    # шлёт Telegram-алерт, даже если прогон формально успешен (упал один источник из многих).
+    if result.warnings:
+        import json
+        import os
+        import tempfile
+
+        github_ws = os.environ.get("GITHUB_WORKSPACE")
+        if github_ws:
+            warn_path = os.path.join(github_ws, f"parse_warnings_{args.city}.json")
+        else:
+            # Локальный запуск: уникальный файл по PID — без race condition при параллельных тестах.
+            warn_path = os.path.join(
+                tempfile.gettempdir(), f"parse_warnings_{args.city}_{os.getpid()}.json"
+            )
+        with open(warn_path, "w", encoding="utf-8") as f:
+            json.dump({"city": args.city, "warnings": result.warnings}, f, ensure_ascii=False)
+        print(f"  ⚠️ предупреждений: {len(result.warnings)} → {warn_path}", file=sys.stderr)
+
     return 0 if result.failed < result.extracted else 1
 
 

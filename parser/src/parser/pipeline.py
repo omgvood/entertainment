@@ -105,10 +105,13 @@ class PipelineResult:
     merged: int = 0
     near_misses: int = 0
     merged_by_source: dict = None  # type: ignore[assignment]
+    warnings: list[str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.merged_by_source is None:
             self.merged_by_source = {}
+        if self.warnings is None:
+            self.warnings = []
 
 
 def _make_discovery(client: httpx.AsyncClient, source: SourceConfig):
@@ -196,6 +199,7 @@ async def run_city(
             result.new += sub.new
             result.extracted += sub.extracted
             result.failed += sub.failed
+            result.warnings.extend(sub.warnings)
 
             if not dry_run and supabase is not None:
                 record_source_health(
@@ -205,6 +209,7 @@ async def run_city(
                     events_found=sub.extracted,
                     errors=sub.failed,
                     duration_sec=duration,
+                    last_error=sub.warnings[0] if sub.warnings else None,
                 )
 
         # 4. Кросс-источниковый merge по id (= city+slug). Несколько источников с одинаковым
@@ -343,6 +348,18 @@ async def _run_direct_api_source(
         items = await _fetch_direct_api_items(client, source, city_slug, provider_keys)
     except _DirectApiConfigError as exc:
         log.error("direct_api.config", source=source.name, reason=str(exc))
+        sub.failed = 1
+        return [], sub
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in (400, 401, 403):
+            # 400 — тоже критичен: некоторые шлюзы возвращают Bad Request на невалидный/отозванный токен
+            msg = f"{source.name}: HTTP {status} — проверь токен/ключ API"
+            log.error("direct_api.auth_error", source=source.name, status=status)
+            sub.failed = 1
+            sub.warnings.append(msg[:200])  # varchar(255) в source_health + лимит Telegram
+            return [], sub
+        log.error("direct_api.failed", source=source.name, error=str(exc))
         sub.failed = 1
         return [], sub
     except Exception as exc:  # noqa: BLE001
