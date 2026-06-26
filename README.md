@@ -119,6 +119,7 @@ Vercel CDN ← пользователь
 | **SPA-листинги через Playwright** | Режим `playwright_listing`: афиша SPA-сайтов (Nuxt/Next/React) рендерится headless-браузером, затем идёт в обычную цепочку `batch_listing` (JSON-LD → LLM). Закрывает первоисточники-организаторы, чей статический HTML пуст. Запущен для Перми (`permopera.ru`, `permm.ru`). Хеш-дедуп считается по **видимому тексту** (динамические скрипты Nuxt игнорируются) | `sources/playwright_fetcher.py`, `pipeline._run_batch_source` (`use_playwright`), `pipeline._hash_html`, `parse.yml` |
 | **Точный `source_url`** | Кнопка «Перейти к источнику» ведёт на конкретное событие/пост, а не на листинг/группу/канал. `event_url` (маркер `=== POST <url> ===` для VK/TG, `<a href>`/JSON-LD для web) резолвится в `source_url`; фолбэк на базовый URL (для VK/TG — на сам пост) при пустом/мусорном значении или домене-сокращателе/агрегаторе (`clck.ru`, `vk.cc`, `taplink.ws`, …) | `url_utils.resolve_event_url` (`JUNK_DOMAINS`), `extraction/jsonld.py`, промпты экстракторов |
 | **Фильтр прошедших** | Репортажи о прошедшем («сегодня прошёл …») не попадают в БД: постфильтр `date < сегодня` в петлях VK/TG/batch + инструкция LLM игнорировать прошедшее время (ориентир «Сегодня» с днём недели) | `pipeline._is_past_event`, промпты экстракторов |
+| **Фильтр spurious `always`** | LLM ставил `date='always'` постам VK/Telegram/generic без явной даты (анонс выставки/«каждую пятницу») — такие карточки засоряли БД и скрывались фронтом. Три слоя защиты: (1) общее правило в промпте запрещает `always` для постов; (2) постфильтр `is_spurious_always` в петлях VK/TG отбраковывает их до записи (счётчик `skipped_always` → `source_health`); (3) guard в `to_event_row` (`→ EventRow \| None`) — последний рубеж для всех веток, включая generic. Площадки (`bowling`/`billiards`/`karting`/`quest`) исключены — им `always` легитимен. Накопленное вычищено миграцией | `extraction/prompts.py`, `validator.is_spurious_always`, `pipeline._safe_to_event_row`, `config.SOCIAL_SOURCE_PREFIXES`/`ALLOWED_ALWAYS_EVENT_TYPES`, миграция `…_remove_always_vk_tg.sql` |
 | **Синхронизация отмен** | Источники с `full_snapshot: true` (QuizPlease) дают полный срез за один вызов. После прогона `sync_source_events` удаляет из БД будущие события источника, которые пропали из ответа API — т.е. отменены. Защита от сбоя: при пустом результате синхронизация пропускается с WARNING. Прошедшие события удаляет TTL (1 день) | `db.sync_source_events`, `pipeline.py`, `config.SourceConfig.full_snapshot`, `seeds.yaml` |
 
 Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
@@ -155,6 +156,7 @@ entertainment/
 │   │   │   ├── retry.py            — with_retry: backoff+jitter на RateLimitError
 │   │   │   ├── fallback.py         — FallbackExtractor: ретрай + фолбэк цепочки провайдеров
 │   │   │   ├── jsonld.py           — Schema.org JSON-LD парсер (перед LLM, без LLM)
+│   │   │   ├── prompts.py          — общие фрагменты промптов (DATE_ALWAYS_INSTRUCTIONS)
 │   │   │   ├── gemini_extractor.py — Google Gemini
 │   │   │   ├── groq_extractor.py   — Groq Llama 3.3 70B
 │   │   │   └── deepseek_extractor.py — DeepSeek V4 Flash (OpenRouter)
@@ -187,6 +189,7 @@ entertainment/
 │   │   ├── test_merge.py           — merge_rows (priority, enrichment, near_misses)
 │   │   ├── test_playwright_2gis.py — parse_cards (HTML-фикстура, без браузера/сети)
 │   │   ├── test_telegram.py        — parse_channel_html, TelegramHtmlProvider
+│   │   ├── test_spurious_always.py — is_spurious_always, guard to_event_row, _safe_to_event_row, промпты
 │   │   ├── test_timepad.py         — TimepadClient._map_category, пагинация
 │   │   ├── test_url_utils.py       — resolve_event_url (относит./мусор/поддомены/фолбэк)
 │   │   ├── test_validator.py       — to_event_row, slug, fingerprint, to_venue
@@ -491,6 +494,23 @@ LLM-экстракторы получают список разрешённых 
   это закрывает промпт: LLM инструктирована игнорировать посты в прошедшем времени, ориентируясь на дату
   «Сегодня» (передаётся с днём недели на русском: `Воскресенье, 14 июня 2026 года`).
 
+**Фильтр spurious `date='always'`** (`validator.is_spurious_always(date, type, source)`) — в петлях VK/Telegram/generic:
+- **Проблема.** LLM трактует пост без явной даты («у нас постоянно идёт выставка», «каждую пятницу стендап»)
+  как `date='always'` — фолбэк, т.к. пустая/невалидная дата ломает Pydantic. Но `'always'` зарезервирован за
+  **постоянными местами** (боулинг/бильярд/…), которые приходят из `direct_api` и пишутся в `venues`, а не `events`.
+  Посты с `'always'` — не площадки: их скрывал фронт, а в БД они копились (фильтр прошедших их пропускает — см. выше).
+- **Предикат.** `is_spurious_always` = `date == 'always'` И источник из `SOCIAL_SOURCE_PREFIXES`
+  (`vk-`/`telegram-`/`generic`) И тип НЕ из `ALLOWED_ALWAYS_EVENT_TYPES` (`bowling`/`billiards`/`karting`/`quest` —
+  им `'always'` легитимен даже из generic-домена постоянного места). Константы — в `config.py` (одно место правды).
+- **Три слоя защиты.** (1) **Промпт** — общий фрагмент `DATE_ALWAYS_INSTRUCTIONS` (`extraction/prompts.py`,
+  вставлен в SINGLE+BATCH всех трёх экстракторов) прямо запрещает `'always'` для постов. (2) **Постфильтр** в
+  петлях VK/TG: `is_spurious_always` отбраковывает событие до резолва URL, инкрементируя `PipelineResult.skipped_always`
+  (агрегат уходит в `source_health.last_error`, если других ошибок нет — сигнал «источник шумит галлюцинациями»).
+  (3) **Guard в `to_event_row`** (`→ EventRow | None`) — единая точка конвертации `_safe_to_event_row` ловит то,
+  что просочилось мимо петлевых фильтров (в т.ч. generic-ветку), и тоже считает в `skipped_always`.
+- **Граница с `direct_api`.** Источники `twogis`/`timepad`/`quizplease` не подпадают под `SOCIAL_SOURCE_PREFIXES`,
+  поэтому их `'always'` (2ГИС-площадки) не трогается — они штатно роутятся в `venues` веткой `_run_direct_api_source`.
+
 ---
 
 ### `db.py` — работа с базой данных
@@ -555,13 +575,23 @@ LLM-экстракторы получают список разрешённых 
 
 ### `validator.py` — валидация и slug
 
-**`to_event_row(parsed, city, source_url, source)`**
+**`to_event_row(parsed, city, source_url, source) -> EventRow | None`**
 - Конвертирует `ParsedEvent` → `EventRow`
+- **Возвращает `None`, если `is_spurious_always(date, type, source)`** — guard против LLM-галлюцинаций
+  `date='always'` у постов VK/Telegram/generic (см. «Фильтр spurious `always`» выше). Пишет warning
+  `validator.spurious_always_dropped`. Все вызывающие обязаны проверить результат на `None`
+  (в pipeline — через wrapper `_safe_to_event_row`, в generic — явной проверкой).
 - Генерирует `slug` через `_make_slug(title, date)`
 - Формирует `id = {city}-{slug}`
 - Проставляет `parsed_at = utcnow()`
 - Если теги пустые (direct_api) — подставляет авто-теги `default_tags_for_type(type)`
 - Вычисляет `fingerprint` через `_fingerprint(title, date, venue_name)`
+
+**`is_spurious_always(date, type, source) -> bool`**
+- Единый предикат «LLM поставил `'always'` посту без даты»: `date == 'always'` И `source` начинается с
+  `vk-`/`telegram-`/`generic` И `type` не в `{bowling, billiards, karting, quest}`. Используется и guard'ом
+  выше, и постфильтром в `pipeline` (петли VK/TG). Константы — `config.SOCIAL_SOURCE_PREFIXES` /
+  `config.ALLOWED_ALWAYS_EVENT_TYPES`.
 
 **`to_venue(parsed, city, source)`**
 - Конвертирует `ParsedEvent` (с `date='always'`) → `Venue` для таблицы `venues`
