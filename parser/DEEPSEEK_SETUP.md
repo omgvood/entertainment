@@ -2,7 +2,7 @@
 
 ## Overview
 
-This parser now supports DeepSeek V4 Flash as an alternative LLM provider through OpenRouter API, alongside Gemini 2.5 Flash and Groq Llama-3.3 70B.
+This parser now supports DeepSeek V4 Flash as an alternative LLM provider through OpenRouter API, alongside Gemini 2.5 Flash and Groq gpt-oss-120b.
 
 ## Setup
 

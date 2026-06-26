@@ -17,3 +17,16 @@ def is_rate_limit(exc: BaseException) -> bool:
         m in s
         for m in ("429", "503", "rate limit", "resource_exhausted", "unavailable", "overloaded")
     )
+
+
+def is_request_too_large(exc: BaseException) -> bool:
+    """True, если ошибка — 413 Request too large (вход превысил TPM-лимит модели).
+
+    Отделён от rate-limit: 413 чинится разбиением входа пополам (см. GroqExtractor),
+    а не ретраем/фолбэком. Duck-typing на .status_code — как в is_rate_limit.
+    """
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status == 413:
+        return True
+    s = str(exc).lower()
+    return "request too large" in s or "request entity too large" in s

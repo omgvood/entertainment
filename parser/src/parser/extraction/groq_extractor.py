@@ -1,4 +1,4 @@
-"""Groq (Llama 3.3 70B и др.) экстрактор события.
+"""Groq (openai/gpt-oss-120b и др.) экстрактор события.
 
 Отличия от Gemini:
 - Schema не enforced на стороне API. Используем response_format=json_object — модель
@@ -7,6 +7,10 @@
 - Для batch просим модель вернуть {"events": [...]} (top-level массив в json_object не
   допускается Groq API — нужен объект).
 - API OpenAI-совместимый.
+
+TPM free-tier у gpt-oss (8K) ниже, чем был у прежней llama-3.3-70b (12K): пачка из 5 постов
+(~11k токенов) не влезает и даёт 413 Request too large. Поэтому extract_many на 413 делит
+батч пополам по границам постов (маркеры «=== POST <url> ===») и переизвлекает рекурсивно.
 """
 
 from __future__ import annotations
@@ -22,12 +26,14 @@ from markdownify import markdownify
 from selectolax.parser import HTMLParser
 
 from ..models import ParsedEvent
-from ._errors import is_rate_limit
+from ._errors import is_rate_limit, is_request_too_large
 from .base import ExtractorError, LLMExtractor, RateLimitError
 from .prompts import DATE_ALWAYS_INSTRUCTIONS
 
 
 log = structlog.get_logger()
+
+_POST_MARKER = "=== POST "  # граница поста в батче VK/TG (pipeline вставляет «=== POST <url> ===»)
 
 _DAYS_RU = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
 _MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня",
@@ -108,7 +114,7 @@ JSON Schema одного события (Pydantic):
 
 
 class GroqExtractor(LLMExtractor):
-    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile") -> None:
+    def __init__(self, api_key: str, model: str = "openai/gpt-oss-120b") -> None:
         self.client = AsyncGroq(api_key=api_key)
         self.model = model
 
@@ -162,7 +168,8 @@ class GroqExtractor(LLMExtractor):
 
     async def extract_many(self, html: str, source_url: str) -> list[ParsedEvent]:
         # На batch допускаем чуть больше — листинг содержит всю афишу.
-        # 40k символов markdown ≈ 10-12k токенов, лезет в 12k TPM (70B). В 6k TPM (8B) — нет.
+        # 40k символов markdown ≈ 10-12k токенов. Free-tier gpt-oss = 8K TPM, поэтому пачка из
+        # 5 постов в него не влезает (413) — обрабатывается разбиением ниже (см. except).
         cleaned = _clean_html(html, max_chars=40_000)
         today = _today_ru()
         log.info(
@@ -191,6 +198,27 @@ class GroqExtractor(LLMExtractor):
         except Exception as exc:  # noqa: BLE001
             if is_rate_limit(exc):
                 raise RateLimitError(f"Groq rate-limit для {source_url}: {exc}") from exc
+            if is_request_too_large(exc):
+                # 413: вход превысил TPM-лимит модели. Делим батч постов пополам по границам
+                # маркеров «=== POST <url> ===» и переизвлекаем каждую половину рекурсивно.
+                halves = _split_posts(html)
+                if halves is None:
+                    # < 2 постов — делить нечего (один пост либо листинг без маркеров).
+                    # fallback to error; для огромного единого листинга — рассмотреть truncation
+                    # max_chars (8K TPM ≈ 32k символов), пока крупные листинги идут через JSON-LD.
+                    raise ExtractorError(
+                        f"Groq 413 (слишком большой вход), делить нечего для {source_url}: {exc}"
+                    ) from exc
+                left, right = halves
+                log.info(
+                    "groq.batch_split",
+                    source_url=source_url,
+                    posts=html.count(_POST_MARKER),
+                    parts=2,
+                )
+                return await self.extract_many(left, source_url) + await self.extract_many(
+                    right, source_url
+                )
             raise ExtractorError(f"Groq API error для {source_url}: {exc}") from exc
 
         text = response.choices[0].message.content if response.choices else None
@@ -233,8 +261,22 @@ class GroqExtractor(LLMExtractor):
         return results
 
 
+def _split_posts(text: str) -> tuple[str, str] | None:
+    """Делит батч постов пополам по границам маркеров «=== POST ».
+
+    Возвращает (первая_половина, вторая_половина) либо None, если делить нечего
+    (< 2 маркеров — один пост или листинг без маркеров). Маркеры задают границы постов,
+    поэтому ни один пост не рвётся внутри. Инвариант: posts(h1)+posts(h2) == posts(text).
+    """
+    positions = [m.start() for m in re.finditer(re.escape(_POST_MARKER), text)]
+    if len(positions) < 2:
+        return None
+    mid = positions[len(positions) // 2]  # средний маркер — точка разреза
+    return text[:mid].rstrip(), text[mid:]
+
+
 def _clean_html(html: str, max_chars: int = 20_000) -> str:
-    """Жмём HTML до Markdown — Groq free tier TPM очень тесный (6k для 8b).
+    """Жмём HTML до Markdown — Groq free-tier TPM тесный (8K у gpt-oss).
 
     1. selectolax выбрасывает script/style/svg/header/footer/nav/aside.
     2. markdownify конвертит остаток в Markdown (без атрибутов, без вложений).

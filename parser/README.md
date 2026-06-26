@@ -14,7 +14,7 @@ Discovery ──── listing-краулер (QuizPlease)
 Dedup ────────── сравнение с source_url уже в БД → пропустить известные
     │
     ▼ только новые
-LLM Extraction ─ Gemini 2.5 Flash-Lite / Groq Llama-3.3 70B
+LLM Extraction ─ Gemini 2.5 Flash-Lite / Groq gpt-oss-120b
                  один промпт → структурированный ParsedEvent (Pydantic)
     │
     ▼

@@ -18,7 +18,7 @@ LlmProvider = Literal["gemini", "groq", "deepseek"]
 
 DEFAULT_MODELS: dict[str, str] = {
     "gemini": "gemini-2.5-flash-lite",
-    "groq": "llama-3.3-70b-versatile",
+    "groq": "openai/gpt-oss-120b",
     "deepseek": "deepseek/deepseek-v4-flash",
 }
 
