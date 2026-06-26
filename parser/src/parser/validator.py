@@ -9,11 +9,44 @@ import hashlib
 import re
 import unicodedata
 
+import structlog
+
+from .config import ALLOWED_ALWAYS_EVENT_TYPES, SOCIAL_SOURCE_PREFIXES
 from .models import EventRow, ParsedEvent, Venue
 from .taxonomy import default_tags_for_type
 
 
-def to_event_row(parsed: ParsedEvent, city: str, source_url: str, source: str) -> EventRow:
+log = structlog.get_logger()
+
+
+def is_spurious_always(date: str, event_type: str, source: str) -> bool:
+    """True — LLM поставил 'always' для social/generic-источника без конкретной даты.
+
+    Площадкам (боулинг/бильярд/...) 'always' легитимен даже из generic, поэтому они
+    исключены. twogis/timepad/quizplease не подпадают под SOCIAL_SOURCE_PREFIXES → не трогаем.
+
+    Единый предикат: используется и в to_event_row (guard), и в pipeline (ранний skip
+    в петлях VK/TG с подробным логом). Константы — в config (одно место правды).
+    """
+    return (
+        date == "always"
+        and any(source.startswith(p) for p in SOCIAL_SOURCE_PREFIXES)
+        and event_type not in ALLOWED_ALWAYS_EVENT_TYPES
+    )
+
+
+def to_event_row(parsed: ParsedEvent, city: str, source_url: str, source: str) -> EventRow | None:
+    """ParsedEvent → EventRow. Возвращает None, если событие отбраковано (spurious 'always').
+
+    None — последний рубеж против LLM-галлюцинаций date='always' для постов VK/Telegram/generic.
+    Caller обязан проверить результат на None и пропустить такую строку.
+    """
+    if is_spurious_always(parsed.date, parsed.type, source):
+        log.warning(
+            "validator.spurious_always_dropped",
+            source=source, title=parsed.title[:80], type=parsed.type,
+        )
+        return None
     slug = _make_slug(parsed.title, parsed.date)
     data = parsed.model_dump()
     # direct_api источники (2ГИС/Timepad) не проставляют теги — подставляем авто-теги по типу.

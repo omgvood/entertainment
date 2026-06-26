@@ -22,6 +22,15 @@ DEFAULT_MODELS: dict[str, str] = {
     "deepseek": "deepseek/deepseek-v4-flash",
 }
 
+# Источники, для которых date='always' — признак LLM-галлюцинации, а не постоянного места.
+# Посты VK/Telegram и generic-листинги — это анонсы событий; 'always' у них означает, что LLM
+# не нашёл явной даты в тексте. Площадки (боулинг/бильярд/...) приходят из direct_api → venues.
+SOCIAL_SOURCE_PREFIXES: tuple[str, ...] = ("vk-", "telegram-", "generic")
+
+# Типы событий, которым 'always' легитимен даже от social/generic-источника (постоянные места).
+# Например, generic-домен боулинг-клуба с расписанием «работаем ежедневно».
+ALLOWED_ALWAYS_EVENT_TYPES: frozenset[str] = frozenset({"bowling", "billiards", "karting", "quest"})
+
 
 @dataclass(frozen=True)
 class Settings:

@@ -19,6 +19,7 @@ from selectolax.parser import HTMLParser
 from ..models import ParsedEvent
 from ._errors import is_rate_limit
 from .base import ExtractorError, LLMExtractor, RateLimitError
+from .prompts import DATE_ALWAYS_INSTRUCTIONS
 
 
 log = structlog.get_logger()
@@ -54,7 +55,7 @@ JSON Schema события (Pydantic):
 - Если опциональное поле не указано или неоднозначно — null.
 - price_min/price_max в рублях, целые числа. Если цена одна — повтори в обоих полях.
 - price_text — готовая строка для UI: 'от 500 ₽', 'от 500 до 1000 ₽'.
-- Для мест с постоянным расписанием (боулинг/бильярд/картинг) — date='always'.
+{DATE_ALWAYS_INSTRUCTIONS}
 - date в формате YYYY-MM-DD. time_start/end в формате HH:MM.
 - image_url — РЕАЛЬНАЯ фотография (jpg/png/webp 400+px), НЕ svg-иконка/значок. Иначе null.
 - organizer — название организатора/компании-устроителя (например 'QuizPlease'), если явно указано; иначе null.
@@ -86,7 +87,7 @@ JSON Schema одного события (Pydantic):
 - Если опциональное поле не указано — null.
 - price_min/price_max в рублях, целые числа. Если цена одна — повтори.
 - price_text — готовая строка для UI: 'от 500 ₽', 'от 500 до 1000 ₽'.
-- Для мест с постоянным расписанием date='always'.
+{DATE_ALWAYS_INSTRUCTIONS}
 - date — YYYY-MM-DD. time_start/end — HH:MM.
 - image_url — РЕАЛЬНАЯ фотография (jpg/png/webp), НЕ svg-иконка/значок. Иначе null.
 - organizer — название организатора/компании-устроителя (например 'QuizPlease'), если явно указано; иначе null.

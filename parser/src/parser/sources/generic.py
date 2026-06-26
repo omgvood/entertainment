@@ -209,7 +209,11 @@ async def _run_domain(
         try:
             # source_url = ссылка на само событие (event_url из JSON-LD/LLM), иначе листинг.
             src_url = resolve_event_url(p.event_url, listing_url)
-            rows.append(to_event_row(p, city_slug, src_url, f"generic:{domain}"))
+            row = to_event_row(p, city_slug, src_url, f"generic:{domain}")
+            if row is None:
+                # spurious date='always' для не-площадки: validator уже залогировал warning.
+                continue
+            rows.append(row)
         except Exception as exc:  # noqa: BLE001
             errors += 1
             log.warning("generic.row.invalid", domain=domain, title=p.title, error=str(exc))

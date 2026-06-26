@@ -42,7 +42,7 @@ from .sources import KudaGoClient, QuizPleaseClient, TelegramHtmlProvider, Timep
 from .sources import vk as vk_mod
 from .sources.generic import run_generic
 from .url_utils import resolve_event_url
-from .validator import to_event_row, to_venue
+from .validator import is_spurious_always, to_event_row, to_venue
 
 
 log = structlog.get_logger()
@@ -122,6 +122,21 @@ def _is_past_event(event_date: str, today_str: str) -> bool:
         return False
 
 
+def _safe_to_event_row(
+    parsed: ParsedEvent, city: str, source_url: str, source: str, sub: "PipelineResult"
+) -> EventRow | None:
+    """Единая точка конвертации в pipeline: to_event_row + учёт отбракованных spurious 'always'.
+
+    to_event_row возвращает None, когда validator-guard отсёк галлюцинацию date='always'
+    (social/generic-источник без явной даты). Здесь это считаем в sub.skipped_always —
+    backstop на случай веток без явного фильтра. Каллер пропускает None-строку.
+    """
+    row = to_event_row(parsed, city, source_url, source)
+    if row is None:
+        sub.skipped_always += 1
+    return row
+
+
 @dataclass
 class PipelineResult:
     discovered: int = 0
@@ -129,6 +144,7 @@ class PipelineResult:
     extracted: int = 0
     failed: int = 0
     written: int = 0
+    skipped_always: int = 0  # отброшено spurious date='always' (social/generic без даты)
     duplicate_candidates: int = 0
     merged: int = 0
     near_misses: int = 0
@@ -232,9 +248,17 @@ async def run_city(
             result.new += sub.new
             result.extracted += sub.extracted
             result.failed += sub.failed
+            result.skipped_always += sub.skipped_always
             result.warnings.extend(sub.warnings)
+            if sub.skipped_always:
+                log.info("source.skipped_always", source=source.name, count=sub.skipped_always)
 
             if not dry_run and supabase is not None:
+                # Непустой skipped_always без других warnings → видно в source_health, что источник
+                # шумит галлюцинациями date='always' (не фатально, но сигнал к проверке промпта).
+                health_last_error = sub.warnings[0] if sub.warnings else None
+                if health_last_error is None and sub.skipped_always:
+                    health_last_error = f"Отброшено spurious 'always': {sub.skipped_always}"
                 record_source_health(
                     supabase,
                     source.name,
@@ -242,7 +266,7 @@ async def run_city(
                     events_found=sub.extracted,
                     errors=sub.failed,
                     duration_sec=duration,
-                    last_error=sub.warnings[0] if sub.warnings else None,
+                    last_error=health_last_error,
                 )
 
         # 4. Кросс-источниковый merge по id (= city+slug). Несколько источников с одинаковым
@@ -342,7 +366,9 @@ async def _run_per_url_source(
             resp = await client.get(d.url, follow_redirects=True, timeout=20.0)
             resp.raise_for_status()
             parsed = await extractor.extract(resp.text, d.url)
-            row = to_event_row(parsed, city_slug, d.url, d.source)
+            row = _safe_to_event_row(parsed, city_slug, d.url, d.source, sub)
+            if row is None:
+                continue
             rows.append(row)
             sub.extracted += 1
             if not dry_run and supabase is not None:
@@ -418,8 +444,10 @@ async def _run_direct_api_source(
                 # как в db.event_row_to_venue — manual-guard в upsert_venues по нему.
                 venues.append(to_venue(parsed, city_slug, "twogis"))
             else:
-                rows.append(to_event_row(parsed, city_slug, source_url, source.name))
-                sub.extracted += 1
+                row = _safe_to_event_row(parsed, city_slug, source_url, source.name, sub)
+                if row is not None:
+                    rows.append(row)
+                    sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
             sub.failed += 1
             log.warning("direct_api.row_invalid", title=parsed.title, error=str(exc))
@@ -511,10 +539,12 @@ async def _run_vk_events_source(
         if parsed is None:
             continue
         try:
-            rows.append(
-                to_event_row(parsed, city_slug, vk_mod.event_group_url(g), source.name)
+            row = _safe_to_event_row(
+                parsed, city_slug, vk_mod.event_group_url(g), source.name, sub
             )
-            sub.extracted += 1
+            if row is not None:
+                rows.append(row)
+                sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
             sub.failed += 1
             log.warning("vk_events.row.invalid", title=parsed.title, error=str(exc))
@@ -614,6 +644,13 @@ async def _run_vk_posts_source(
                     if _is_past_event(parsed.date, today_str):
                         log.debug("vk_posts.skip.past", title=parsed.title[:50], date=parsed.date)
                         continue
+                    if is_spurious_always(parsed.date, parsed.type, source.name):
+                        log.debug(
+                            "vk_posts.skip.always",
+                            title=parsed.title[:50], type=parsed.type, price=parsed.price_text,
+                        )
+                        sub.skipped_always += 1
+                        continue
                     event_src_url = resolve_event_url(parsed.event_url, group_url)
                     log.debug(
                         "vk_posts.event_url",
@@ -621,7 +658,10 @@ async def _run_vk_posts_source(
                         raw=parsed.event_url,
                         resolved=event_src_url,
                     )
-                    rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
+                    row = _safe_to_event_row(parsed, city_slug, event_src_url, source.name, sub)
+                    if row is None:
+                        continue
+                    rows.append(row)
                     sub.extracted += 1
                 except Exception as exc:  # noqa: BLE001
                     sub.failed += 1
@@ -719,6 +759,13 @@ async def _run_telegram_posts_source(
                     if _is_past_event(parsed.date, today_str):
                         log.debug("telegram_posts.skip.past", title=parsed.title[:50], date=parsed.date)
                         continue
+                    if is_spurious_always(parsed.date, parsed.type, source.name):
+                        log.debug(
+                            "telegram_posts.skip.always",
+                            title=parsed.title[:50], type=parsed.type, price=parsed.price_text,
+                        )
+                        sub.skipped_always += 1
+                        continue
                     event_src_url = resolve_event_url(parsed.event_url, channel_url)
                     log.debug(
                         "telegram_posts.event_url",
@@ -726,7 +773,10 @@ async def _run_telegram_posts_source(
                         raw=parsed.event_url,
                         resolved=event_src_url,
                     )
-                    rows.append(to_event_row(parsed, city_slug, event_src_url, source.name))
+                    row = _safe_to_event_row(parsed, city_slug, event_src_url, source.name, sub)
+                    if row is None:
+                        continue
+                    rows.append(row)
                     sub.extracted += 1
                 except Exception as exc:  # noqa: BLE001
                     sub.failed += 1
@@ -855,7 +905,9 @@ async def _run_batch_source(
                 resolved=event_src_url,
                 base=source.url,
             )
-            row = to_event_row(parsed, city_slug, event_src_url, source.name)
+            row = _safe_to_event_row(parsed, city_slug, event_src_url, source.name, sub)
+            if row is None:
+                continue
             rows.append(row)
             sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
