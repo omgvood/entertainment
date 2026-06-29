@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Афиша Пермь — редизайн (макет)</title>
+  <meta name="description" content="Макет нового UI: горизонтальный FilterBar, обогащённые карточки, группировка по дате, поиск.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ШАПКА (без поиска — он переехал в FilterBar) -->
+<header class="header">
+  <div class="header-inner">
+    <a href="/" class="logo">
+      <span class="logo-mark">🎟</span>
+      <span class="logo-text">Афиша<span class="logo-accent">.PRM</span></span>
+    </a>
+    <nav class="city-nav" aria-label="Выбор города">
+      <a class="city-tab active" href="#"><span>📍</span> Пермь</a>
+      <a class="city-tab" href="#"><span>📍</span> Сочи</a>
+    </nav>
+  </div>
+</header>
+
+<!-- FILTERBAR (sticky) -->
+<div class="filterbar">
+  <div class="filterbar-inner">
+    <div class="search">
+      <span class="search-icon">🔍</span>
+      <input id="search" type="search" placeholder="Поиск: название, площадка, организатор…" autocomplete="off">
+    </div>
+
+    <div class="fb-divider"></div>
+
+    <div class="chips" id="chips"><!-- приоритетные чипы + кнопка «Ещё» --></div>
+
+    <div class="fb-divider"></div>
+
+    <div class="when" id="when">
+      <button data-when="today">Сегодня</button>
+      <button data-when="tomorrow">Завтра</button>
+      <button data-when="weekend">Выходные</button>
+      <button data-when="any" class="active">Любая</button>
+    </div>
+
+    <div class="fb-divider"></div>
+
+    <div class="price">
+      <input id="priceMin" type="number" min="0" value="0" aria-label="Цена от">
+      <span>—</span>
+      <input id="priceMax" type="number" min="0" value="5000" aria-label="Цена до">
+      <span>₽</span>
+    </div>
+
+    <div class="fb-divider"></div>
+
+    <label class="toggle">
+      <input id="datedOnly" type="checkbox">
+      <span class="toggle-track"></span>
+      <span>Только с датой</span>
+    </label>
+  </div>
+</div>
+
+<!-- КОНТЕНТ -->
+<main class="content">
+  <div class="container">
+    <div class="content-head">
+      <h1>Куда сходить в Перми</h1>
+      <p class="count">Найдено: <strong id="count">0</strong> <span id="countWord">событий</span></p>
+    </div>
+    <div id="sections"><!-- секции по дате рендерятся из app.js --></div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <p>Афиша Пермь · макет редизайна · 2026 · <small>интерактивный прототип (vanilla JS)</small></p>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
