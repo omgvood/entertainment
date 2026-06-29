@@ -7,6 +7,7 @@ from parser.discovery import ListingDiscovery
 from parser.sources.candidate_sources import (
     Candidate,
     _AGGREGATOR_PENALTY,
+    _AGGREGATOR_PENALTY_DOMAINS,
     _score_candidate,
 )
 
@@ -78,10 +79,13 @@ async def _score(domain, *, queries=("афиша Пермь",), sample_urls=(), 
     return cand.score
 
 
-@pytest.mark.parametrize("domain", ["afisha.ru", "ticketland.ru", "kassir.ru"])
+# Прочие билетные платформы (afisha.ru/ticketland.ru/kassir.ru) переехали в _IGNORE_DOMAINS —
+# они отсеиваются в collect_candidates до скоринга (тесты в test_candidate_sources.py).
+# Здесь проверяем сам механизм штрафа на оставшемся пенальти-домене (timepad.ru).
+@pytest.mark.parametrize("domain", sorted(_AGGREGATOR_PENALTY_DOMAINS))
 @pytest.mark.asyncio
 async def test_known_aggregators_penalized(domain):
-    """Каждый домен из списка получает штраф (защита от случайного удаления домена)."""
+    """Каждый домен из пенальти-списка получает штраф (защита от случайного удаления домена)."""
     aggregator = await _score(domain)
     normal = await _score("teatr-teatr.com")
     assert aggregator == normal - _AGGREGATOR_PENALTY
@@ -89,8 +93,8 @@ async def test_known_aggregators_penalized(domain):
 
 @pytest.mark.asyncio
 async def test_aggregator_subdomain_penalized():
-    """Поддомен агрегатора (perm.afisha.ru) тоже штрафуется."""
-    sub = await _score("perm.afisha.ru")
+    """Поддомен пенальти-домена (sub.timepad.ru) тоже штрафуется."""
+    sub = await _score("sub.timepad.ru")
     normal = await _score("perm.example.com")
     assert sub == normal - _AGGREGATOR_PENALTY
 
@@ -114,7 +118,7 @@ async def test_aggregator_penalty_mechanics():
         "sample_urls": ["https://x/afisha/show"],
         "html": _JSONLD_HTML,
     }
-    aggregator = await _score("afisha.ru", **signals)
+    aggregator = await _score("timepad.ru", **signals)
     normal = await _score("teatr-teatr.com", **signals)
     assert aggregator == normal - _AGGREGATOR_PENALTY
 
@@ -122,11 +126,11 @@ async def test_aggregator_penalty_mechanics():
 @pytest.mark.asyncio
 async def test_local_organizer_beats_aggregator():
     """Бизнес-цель: локальный организатор обгоняет агрегатор при сильных сигналах у обоих."""
-    # afisha.ru: JSON-LD(+3) + event-path(+2) + 2 запроса(+1) − штраф(5) = +1
+    # timepad.ru: JSON-LD(+3) + event-path(+2) + 2 запроса(+1) − штраф(5) = +1
     aggregator = await _score(
-        "afisha.ru",
+        "timepad.ru",
         queries=("афиша Пермь", "концерт Пермь"),
-        sample_urls=["https://afisha.ru/afisha/x"],
+        sample_urls=["https://timepad.ru/afisha/x"],
         html=_JSONLD_HTML,
     )
     # teatr-teatr.com: JSON-LD(+3) + event-path(+2) + 1 запрос(0) = +5
@@ -141,11 +145,9 @@ async def test_local_organizer_beats_aggregator():
 
 @pytest.mark.asyncio
 async def test_ranking_organizers_above_aggregators():
-    """Интеграционный: после сортировки по score top-2 — организаторы, не агрегаторы."""
+    """Интеграционный: после сортировки по score организатор обгоняет штрафованный агрегатор."""
     domains = {
-        "afisha.ru": ("афиша Пермь", "концерт Пермь"),       # +1
-        "ticketland.ru": ("афиша Пермь", "квиз Пермь"),       # +1
-        "kassir.ru": ("афиша Пермь",),                         # 0
+        "timepad.ru": ("афиша Пермь", "концерт Пермь"),      # +1 (штраф)
         "teatr-teatr.com": ("афиша Пермь",),                  # +5
         "filarmonia.online": ("афиша Пермь",),                # +5
     }
@@ -162,4 +164,4 @@ async def test_ranking_organizers_above_aggregators():
     ranked = sorted(scored, key=lambda pair: pair[1], reverse=True)
     top2 = {domain for domain, _ in ranked[:2]}
     assert top2 == {"teatr-teatr.com", "filarmonia.online"}
-    assert "afisha.ru" not in top2
+    assert "timepad.ru" not in top2

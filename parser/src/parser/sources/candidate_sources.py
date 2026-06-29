@@ -35,16 +35,31 @@ QUERY_TEMPLATES = [
     "мастер-класс {city}",
     "детские мероприятия {city}",
     "афиша {city}",
+    "экскурсии {city}",
+    "фестиваль {city}",
+    "куда сходить {city}",
 ]
 
 # Пути, характерные для страниц с событиями — дают бонус к скорингу.
 _EVENT_PATH_HINTS = ("/events", "/afisha", "/schedule", "/event", "/poster")
 
 # Домены-агрегаторы/соцсети/поисковики — не кандидаты в источники.
+# Сравнение суффиксное (_is_ignored): домен ИЛИ любой его родитель в списке → пропуск.
+# Федеральные билетные платформы (ticketland/kassir/kassy/afisha) сюда же: дублируют Timepad,
+# unique_events_ratio ≈ 0 — бесполезны как первоисточники, незачем держать кандидатами.
 _IGNORE_DOMAINS = {
     "vk.com", "ok.ru", "t.me", "telegram.me", "youtube.com", "youtu.be",
     "instagram.com", "facebook.com", "dzen.ru", "yandex.ru", "google.com",
     "duckduckgo.com", "wikipedia.org", "2gis.ru", "avito.ru",
+    "ticketland.ru", "kassir.ru", "kassy.ru", "afisha.ru", "tripadvisor.ru",
+}
+
+# Платформы-конструкторы сайтов: auto-approve запрещён. JSON-LD/event-path у них бывают
+# хорошими, но domain второго уровня (tilda.ws) — не организатор, а хостинг тысяч разных
+# сайтов; generic не должен брать его как один источник.
+_BUILDER_DOMAINS = {
+    "tilda.ws", "tilda.cc", "wixsite.com", "ucoz.ru", "ucoz.net",
+    "nethouse.ru", "bitrix24.site",
 }
 
 # Сила штрафа Discovery для агрегаторов. Именованная константа — изменение однострочное.
@@ -60,10 +75,9 @@ _AGGREGATOR_PENALTY = 5
 #   2. регулярно появляются в Discovery и занимают место локальных организаторов.
 # timepad.ru здесь временно: _known_domains() не ловит direct_api без url в seeds.
 # После внедрения SourceConfig.domain должен уйти из этого списка.
+# Прочие билетные платформы (afisha/ticketland/kassir) переехали в _IGNORE_DOMAINS —
+# их незачем держать даже кандидатами с пониженным скором.
 _AGGREGATOR_PENALTY_DOMAINS = {
-    "afisha.ru",
-    "ticketland.ru",
-    "kassir.ru",
     "timepad.ru",
 }
 
@@ -316,6 +330,49 @@ def _domain_of(url: str) -> str | None:
     return netloc[4:] if netloc.startswith("www.") else netloc or None
 
 
+def _normalize_domain(domain: str) -> str:
+    d = domain.lower()
+    return d[4:] if d.startswith("www.") else d
+
+
+def _match_domain_set(domain: str, domain_set: set[str]) -> bool:
+    """True если domain или любой его родительский домен есть в domain_set.
+
+    Блокировка строго вниз по иерархии: 'kassir.ru' в сете ловит 'perm.kassir.ru',
+    но 'afisha.yandex.ru' в сете НЕ трогает 'yandex.ru'. Цикл идёт снизу вверх
+    (от суффикса к полному домену) — раннее попадание = return True.
+    """
+    parts = domain.split(".")
+    for i in range(len(parts) - 1, -1, -1):
+        if ".".join(parts[i:]) in domain_set:
+            return True
+    return False
+
+
+def _is_ignored(domain: str) -> bool:
+    """Домен или его родитель в _IGNORE_DOMAINS (нечувствительно к регистру/www.)."""
+    return _match_domain_set(_normalize_domain(domain), _IGNORE_DOMAINS)
+
+
+def _should_auto_approve(cand: Candidate) -> bool:
+    """Первоисточник с сильными сигналами → одобряем без ручной модерации.
+
+    Критерии (все вместе): JSON-LD типа Event на sample-странице, событийный путь в
+    sample_urls, домен встретился в ≥3 запросах. Агрегаторы (_AGGREGATOR_PENALTY_DOMAINS)
+    и платформы-конструкторы (_BUILDER_DOMAINS) исключены — у конструктора domain второго
+    уровня не идентифицирует организатора.
+    """
+    d = _normalize_domain(cand.domain)
+    if _match_domain_set(d, _AGGREGATOR_PENALTY_DOMAINS):
+        return False
+    if _match_domain_set(d, _BUILDER_DOMAINS):
+        return False
+    has_event_path = any(
+        any(h in u.lower() for h in _EVENT_PATH_HINTS) for u in cand.sample_urls
+    )
+    return cand.has_jsonld_event and has_event_path and len(cand.queries) >= 3
+
+
 def _known_domains(city_slug: str) -> set[str]:
     """Домены, уже описанные в seeds.yaml для города — их в кандидаты не берём."""
     cities = load_seeds()
@@ -370,7 +427,7 @@ async def collect_candidates(
 
         for url in urls:
             domain = _domain_of(url)
-            if not domain or domain in skip_domains or domain in _IGNORE_DOMAINS:
+            if not domain or domain in skip_domains or _is_ignored(domain):
                 continue
             cand = by_domain.get(domain)
             if cand is None:  # первое обнаружение домена
@@ -470,16 +527,30 @@ def save_candidates(client: Client, candidates: list[Candidate]) -> int:
             "last_seen": now,
         }
         if existing:
-            # статус не трогаем (могли уже approved/rejected), found_at/first_* не трогаем
+            current_status = existing[0].get("status")
+            if current_status == "new" and _should_auto_approve(cand):
+                # Прогрессирующий домен: набрал критерии (напр. был 1 запрос, стало 4) → апгрейд.
+                # Лог пишем только в момент реального перехода new→approved, не на каждом прогоне.
+                payload["status"] = "approved"
+                log.info("candidate.auto_approved", domain=cand.domain, score=cand.score,
+                         queries=len(cand.queries), trigger="update")
+            else:
+                # approved/rejected (ручные или ранее авто) и new без критериев — статус не трогаем
+                payload.pop("status", None)
+            # found_at/first_* тоже не трогаем (заданы при insert)
             client.table("candidate_sources").update(payload).eq(
                 "domain", cand.domain
             ).execute()
         else:
-            payload["status"] = "new"
+            status = "approved" if _should_auto_approve(cand) else "new"
+            payload["status"] = status
             payload["found_at"] = now
             payload["first_provider"] = cand.first_provider
             payload["first_query"] = cand.first_query
             client.table("candidate_sources").insert(payload).execute()
+            if status == "approved":
+                log.info("candidate.auto_approved", domain=cand.domain, score=cand.score,
+                         queries=len(cand.queries), trigger="insert")
         written += 1
     return written
 

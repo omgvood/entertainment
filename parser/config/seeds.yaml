@@ -105,10 +105,12 @@ cities:
             priority: 50
             enabled: true
 
-      # Generic — одобренные кандидаты (длинный хвост). Включить после замера покрытия VK.
-      # - name: generic
-      #   extraction_mode: generic
-      #   priority: 20
+      # Generic — одобренные в candidate_sources домены (длинный хвост).
+      # Безопасно при пустом списке approved-доменов: 0 доменов → 0 LLM-вызовов.
+      # Самоактивируется после discover-sources --city sochi + одобрения кандидатов.
+      - name: generic
+        extraction_mode: generic
+        priority: 20
 
   perm:
     sources:
