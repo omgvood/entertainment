@@ -8,9 +8,11 @@
   допускается Groq API — нужен объект).
 - API OpenAI-совместимый.
 
-TPM free-tier у gpt-oss (8K) ниже, чем был у прежней llama-3.3-70b (12K): пачка из 5 постов
-(~11k токенов) не влезает и даёт 413 Request too large. Поэтому extract_many на 413 делит
-батч пополам по границам постов (маркеры «=== POST <url> ===») и переизвлекает рекурсивно.
+TPM free-tier у gpt-oss (8K) тесный. Фиксированный оверхед запроса (system-промпт со схемой
+~2k токенов + резерв max_tokens) сам по себе близок к лимиту, поэтому batch-вызов на free-tier
+почти всегда даёт 413 «Request too large … TPM». Это лимит, а не размер входа (разбиением не
+лечится), поэтому _errors.is_rate_limit относит его к rate-limit → ретрай/фолбэк на Gemini.
+Single-extract (max_tokens=2000) в лимит укладывается и работает.
 """
 
 from __future__ import annotations
@@ -26,14 +28,12 @@ from markdownify import markdownify
 from selectolax.parser import HTMLParser
 
 from ..models import ParsedEvent
-from ._errors import is_rate_limit, is_request_too_large
+from ._errors import is_rate_limit
 from .base import ExtractorError, LLMExtractor, RateLimitError
 from .prompts import DATE_ALWAYS_INSTRUCTIONS
 
 
 log = structlog.get_logger()
-
-_POST_MARKER = "=== POST "  # граница поста в батче VK/TG (pipeline вставляет «=== POST <url> ===»)
 
 _DAYS_RU = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
 _MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня",
@@ -168,8 +168,8 @@ class GroqExtractor(LLMExtractor):
 
     async def extract_many(self, html: str, source_url: str) -> list[ParsedEvent]:
         # На batch допускаем чуть больше — листинг содержит всю афишу.
-        # 40k символов markdown ≈ 10-12k токенов. Free-tier gpt-oss = 8K TPM, поэтому пачка из
-        # 5 постов в него не влезает (413) — обрабатывается разбиением ниже (см. except).
+        # max_tokens=4000 (а не 8000): для пачки постов столько вывода не нужно, а резерв
+        # max_tokens целиком идёт в TPM-счётчик Groq — лишний резерв сам провоцирует 413.
         cleaned = _clean_html(html, max_chars=40_000)
         today = _today_ru()
         log.info(
@@ -193,32 +193,13 @@ class GroqExtractor(LLMExtractor):
                 ],
                 response_format={"type": "json_object"},
                 temperature=0,
-                max_tokens=8000,
+                max_tokens=4000,
             )
         except Exception as exc:  # noqa: BLE001
+            # Groq 413 «Request too large … TPM» тоже сюда: is_rate_limit относит его к
+            # rate-limit, и FallbackExtractor уводит батч на Gemini (см. _errors.is_rate_limit).
             if is_rate_limit(exc):
                 raise RateLimitError(f"Groq rate-limit для {source_url}: {exc}") from exc
-            if is_request_too_large(exc):
-                # 413: вход превысил TPM-лимит модели. Делим батч постов пополам по границам
-                # маркеров «=== POST <url> ===» и переизвлекаем каждую половину рекурсивно.
-                halves = _split_posts(html)
-                if halves is None:
-                    # < 2 постов — делить нечего (один пост либо листинг без маркеров).
-                    # fallback to error; для огромного единого листинга — рассмотреть truncation
-                    # max_chars (8K TPM ≈ 32k символов), пока крупные листинги идут через JSON-LD.
-                    raise ExtractorError(
-                        f"Groq 413 (слишком большой вход), делить нечего для {source_url}: {exc}"
-                    ) from exc
-                left, right = halves
-                log.info(
-                    "groq.batch_split",
-                    source_url=source_url,
-                    posts=html.count(_POST_MARKER),
-                    parts=2,
-                )
-                return await self.extract_many(left, source_url) + await self.extract_many(
-                    right, source_url
-                )
             raise ExtractorError(f"Groq API error для {source_url}: {exc}") from exc
 
         text = response.choices[0].message.content if response.choices else None
@@ -259,20 +240,6 @@ class GroqExtractor(LLMExtractor):
                     error=str(exc),
                 )
         return results
-
-
-def _split_posts(text: str) -> tuple[str, str] | None:
-    """Делит батч постов пополам по границам маркеров «=== POST ».
-
-    Возвращает (первая_половина, вторая_половина) либо None, если делить нечего
-    (< 2 маркеров — один пост или листинг без маркеров). Маркеры задают границы постов,
-    поэтому ни один пост не рвётся внутри. Инвариант: posts(h1)+posts(h2) == posts(text).
-    """
-    positions = [m.start() for m in re.finditer(re.escape(_POST_MARKER), text)]
-    if len(positions) < 2:
-        return None
-    mid = positions[len(positions) // 2]  # средний маркер — точка разреза
-    return text[:mid].rstrip(), text[mid:]
 
 
 def _clean_html(html: str, max_chars: int = 20_000) -> str:
