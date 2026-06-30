@@ -38,7 +38,7 @@ from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
 from .merge import merge_rows
 from .models import EventRow, EventType, ParsedEvent, Venue
-from .sources import KudaGoClient, QuizPleaseClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
+from .sources import KudaGoClient, PermMuseumClient, PermOperaClient, QuizPleaseClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
 from .sources import vk as vk_mod
 from .sources.generic import run_generic
 from .url_utils import resolve_event_url
@@ -506,6 +506,16 @@ async def _fetch_direct_api_items(
         if not source.quizplease_city_id:
             raise _DirectApiConfigError("нужен quizplease_city_id")
         return await QuizPleaseClient(client, city_slug).search(source.quizplease_city_id)
+
+    if source.provider in ("permm", "permopera"):
+        if not source.event_type or not source.venue_name:
+            raise _DirectApiConfigError("нужны event_type и venue_name")
+        cls = PermMuseumClient if source.provider == "permm" else PermOperaClient
+        return await cls(client).search(
+            event_type=source.event_type,
+            venue_name=source.venue_name,
+            address=source.address or "",
+        )
 
     return None
 

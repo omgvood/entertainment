@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "id": 1016,
+      "url": "/exhibition/zvuchit-uvertura-2026",
+      "href_extended": "https://permm.ru/~/zvuchit_uvertura-2026",
+      "media_url_extended": "/storage/tilda/https://static.tildacdn.com/tild3234-6135-4330-b339-363166656565/__10__14.jpg",
+      "title_extended": "Звучит Увертюра",
+      "sub_title_extended": "Избранные работы из собрания Музея современного искусства «ПЕРММ»",
+      "starts_at": "11.06.2026",
+      "ends_at": "31.12.2026",
+      "age_restriction": "12",
+      "media": null
+    },
+    {
+      "id": 995,
+      "url": "/exhibition/prostye-peizazhi",
+      "href_extended": "https://permm.ru/~/prostye-peizazhi",
+      "media_url_extended": "/storage/tilda/https://static.tildacdn.com/tild3031-6237-4437-a266-316132303931/prp.jpg",
+      "title_extended": "Выставка «Простые пейзажи. Пермь»",
+      "sub_title_extended": "Совместный проект музея «ПЕРММ», художника Андрея Люблинского, композитора Полины Лимье и школы дизайна «Точка»",
+      "starts_at": "25.04.2026",
+      "ends_at": "28.09.2026",
+      "age_restriction": "0",
+      "media": null
+    }
+  ]
+}

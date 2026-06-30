@@ -228,17 +228,26 @@ cities:
       # event_type — дефолт для JSON-LD, когда Schema.org @type не уточняет тип события.
       # priority 55: выше vk-posts/40 и generic/20, ниже quizplease/60 (первоисточник
       # организатора ценнее агрегаторских постов, но не перебивает профильный API).
+      # permopera/permm — SPA с открытыми JSON-эндпоинтами под капотом → direct_api
+      # (без браузера и без LLM). venue_name/address хардкодим тут: у каждой одна площадка.
+      # full_snapshot: эндпоинты дают полный актуальный срез → sync удаляет снятые/отменённые.
       - name: permopera
-        extraction_mode: playwright_listing
-        url: https://www.permopera.ru/afisha/
+        extraction_mode: direct_api
+        provider: permopera
         event_type: concert
+        venue_name: "Пермский театр оперы и балета им. П. И. Чайковского"
+        address: "Пермь, ул. Петропавловская, 25а"
         priority: 55
+        full_snapshot: true
 
       - name: permm
-        extraction_mode: playwright_listing
-        url: https://permm.ru/afisha
+        extraction_mode: direct_api
+        provider: permm
         event_type: exhibition
+        venue_name: "Музей современного искусства ПЕРММ"
+        address: "Пермь, бул. Гагарина, 24"
         priority: 55
+        full_snapshot: true
 
       # DeepSeek тестовый источник (раскомментировать для локального тестирования)
       # - name: quizplease-deepseek-test

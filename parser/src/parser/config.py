@@ -202,6 +202,11 @@ class SourceConfig:
     """Поисковый запрос: 'боулинг Пермь'."""
     event_type: Optional[str] = None
     """Тип, который присваивается всем событиям из этого источника."""
+    venue_name: Optional[str] = None
+    """Площадка по умолчанию для direct_api-источников, где адреса нет в JSON (permm/permopera).
+    Хранится в seeds, а не в коде: музей может переехать, театр — открыть вторую сцену."""
+    address: Optional[str] = None
+    """Адрес площадки по умолчанию (пара к venue_name)."""
 
     # Для direct_api / quizplease:
     quizplease_city_id: Optional[int] = None
@@ -257,6 +262,8 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
                 provider=s.get("provider"),
                 api_query=s.get("api_query"),
                 event_type=s.get("event_type"),
+                venue_name=s.get("venue_name"),
+                address=s.get("address"),
                 quizplease_city_id=s.get("quizplease_city_id"),
                 full_snapshot=s.get("full_snapshot", False),
                 vk_city_id=s.get("vk_city_id"),

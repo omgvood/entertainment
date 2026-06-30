@@ -1,0 +1,274 @@
+{
+  "data": [
+    {
+      "id": 34,
+      "title": "Ближайшие события",
+      "events": [
+        [
+          {
+            "url": "/events/vystavka-zvucit-uvertyura",
+            "href_extended": null,
+            "media_url_extended": "/storage/media/VSwUZoQAJy9psk9IMUWKNHkqBhxqxUuidF7tP3E3.jpg",
+            "title_extended": "Экскурсии по выставке «Звучит увертюра»",
+            "sub_title_extended": "Избранные работы из собрания Музея современного искусства «ПЕРММ», переосмысленные через метафору оркестра.",
+            "starts_at": "27.06.2026",
+            "ends_at": "28.06.2026",
+            "ts": 17825004000
+          },
+          {
+            "url": "/events/kulturnaya-sreda",
+            "href_extended": "https://permm.ru/~/besplatnaya-sreda",
+            "media_url_extended": "/storage/media/b4YU6VUfiiU6DGH62FHJ7ht6ZwBmGyY9DD7F8lLM.jpg",
+            "title_extended": "Культурная среда",
+            "sub_title_extended": "Каждую третью среду месяца в ПЕРММ проходит акция «Культурная среда» — гости, относящиеся к льготным категориям, смогут посетить музей бесплатно. К льготным категориям относятся школьники, студенты, волонтеры музея, пенсионеры и другие гости.",
+            "starts_at": "15.07.2026",
+            "ends_at": null,
+            "ts": 1784055600
+          }
+        ]
+      ]
+    },
+    {
+      "id": 35,
+      "title": "Новости",
+      "events": [
+        [
+          {
+            "url": "/events/festival-permskii-teatralnyi",
+            "href_extended": null,
+            "media_url_extended": "/storage/media/sTD6CXufBI21fKV2m9sobCIzvqiGzntYm05ij9tO.jpg",
+            "title_extended": "Фестиваль «Пермский театральный»",
+            "sub_title_extended": "Музей современного искусства «ПЕРММ» станет одной из площадок фестиваля «Пермский театральный», посвящённого 150-летию Союза театральных деятелей РФ.",
+            "starts_at": "20.06.2026",
+            "ends_at": "21.06.2026",
+            "ts": 17818956000
+          },
+          {
+            "url": "/events/vystavka-zvucit-uvertyura-1",
+            "href_extended": "https://permm.ru/~/zvuchit_uvertura-2026",
+            "media_url_extended": "/storage/media/5i4sgDuF1Tt5vlSIbS3ZMphAr6x1CkOIQ4oBN3Kh.jpg",
+            "title_extended": "Выставка «Звучит увертюра»",
+            "sub_title_extended": "Избранные работы из собрания Музея современного искусства «ПЕРММ»",
+            "starts_at": "11.06.2026",
+            "ends_at": "31.12.2026",
+            "ts": 17811180000
+          },
+          {
+            "url": "/events/permm-x-520",
+            "href_extended": null,
+            "media_url_extended": "/storage/media/GkUfgEY3xdiSbnM7e1R6O4XSDICsY0xHdNFKCxFL.jpg",
+            "title_extended": "ПЕРММ x 5.20",
+            "sub_title_extended": "Наши друзья из кондитерской и кофейни 5.20 вдохновились графикой Владимира Яшке «Огурец. Помидор» из коллекции музея ПЕРММ и создали специальный корпусный десерт!",
+            "starts_at": "04.06.2026",
+            "ends_at": null,
+            "ts": 17805132000
+          }
+        ],
+        [
+          {
+            "url": "/events/vystavka-razobrano",
+            "href_extended": "https://permm.ru/~/razobrano_2026",
+            "media_url_extended": "/storage/media/c5CIZg3HeU5UaHkcVd4VfuZTtUkcVi1uUwmer43V.jpg",
+            "title_extended": "Выставка «Разобрано»",
+            "sub_title_extended": "Совместный проект Фонда креативных индустрий Пермского края и музея современного искусства, посвящённый локальному дизайну, ремеслу и современным авторским практикам.",
+            "starts_at": "16.05.2026",
+            "ends_at": "28.06.2026",
+            "ts": 17788716000
+          },
+          {
+            "url": "/events/noc-muzeev-2026",
+            "href_extended": "https://permm.ru/~/noch-muzeev-2026",
+            "media_url_extended": "/storage/media/AnDxV6eibXeGCqBYtsnb3qjPRXWS3YNStsAwQVuF.jpg",
+            "title_extended": "Ночь музеев — 2026",
+            "sub_title_extended": "Главная тема акции — «Родное». В этот вечер музей станет пространством звуков Перми, а центральным проектом — выставка «Простые пейзажи. Пермь». В программе: экскурсии, мастер-классы, лекции и музыка.",
+            "starts_at": "16.05.2026",
+            "ends_at": null,
+            "ts": 17788716000
+          },
+          {
+            "url": "/events/ambassadory-puskinskoi-karty",
+            "href_extended": "https://xn--80aapampemcchfmo7a3c9ehj.xn--p1ai/news/minkultury-rossii-obyavlyaet-otbor-ambassadorov-pushkinskoy-karty/",
+            "media_url_extended": "/storage/media/2yLvuwbKRS3pyywuhmaBj0ynOw9MzLHKqRc2b8YW.jpg",
+            "title_extended": "Амбассадоры «Пушкинской карты»",
+            "sub_title_extended": "Министерство культуры России запускает проект «Амбассадоры Пушкинской карты». Отбор будет проходить до сентября 2026 года.",
+            "starts_at": "08.05.2026",
+            "ends_at": null,
+            "ts": 17781804000
+          }
+        ],
+        [
+          {
+            "url": "/events/vystavka-prostye-peizazi-perm",
+            "href_extended": "https://permm.ru/~/prostye-peizazhi",
+            "media_url_extended": "/storage/media/1mnjYbbXCBDYhWBVBR2wCGX1mF9egrIhxkJsHWPc.png",
+            "title_extended": "Выставка «Простые пейзажи. Пермь»",
+            "sub_title_extended": "Совместный проект музея «ПЕРММ», художника Андрея Люблинского, композитора Полины Лимье и школы дизайна «Точка»",
+            "starts_at": "25.04.2026",
+            "ends_at": "28.09.2026",
+            "ts": 17770572000
+          },
+          {
+            "url": "/events/krasim",
+            "href_extended": "https://permm.ru/~/krasim",
+            "media_url_extended": "/storage/tilda/tild6332-3539-4462-b630-633139303861__krasim_face.png",
+            "title_extended": "КРАСИМ. Проект музея ПЕРММ",
+            "sub_title_extended": "Не просто выставка, а настоящее путешествие по Пермскому краю через творчество",
+            "starts_at": "08.07.2025",
+            "ends_at": "31.08.2025",
+            "ts": 17516074200
+          },
+          {
+            "url": "/events/permm-aidentika",
+            "href_extended": "https://permm.ru/~/permm-aidentika",
+            "media_url_extended": "/storage/tilda/tild3730-3736-4361-b962-393133613835__permm_1.gif",
+            "title_extended": "Обновленный фирменный стиль музея ПЕРММ",
+            "sub_title_extended": "Представляем обновлённый фирменный стиль и айдентику",
+            "starts_at": null,
+            "ends_at": null,
+            "ts": 17430148200
+          }
+        ],
+        [
+          {
+            "url": "/events/otkrytie-vystavki-i-naucnaya-konferenciya-art-science-otkrytye-tela",
+            "href_extended": "https://permm.ru/~/art-science-otkrytye-tela-vystavka",
+            "media_url_extended": "/storage/media/fWuSdB1Qh8nb0uLA7H69n9wxCtmmL7JkaLSYW9br.gif",
+            "title_extended": "«Art & Science: Открытые тела»: ОТКРЫТИЕ ВЫСТАВКИ И НАУЧНАЯ КОНФЕРЕНЦИЯ",
+            "sub_title_extended": "6 июля в PERMM открывается итоговая выставка стипендиальной программы музея PERMM и фонда «Норпексаль» — «Art & Science: Открытые тела», инициированная музеем PERMM для разговора о взаимодействии науки и искусства.",
+            "starts_at": "06.07.2024",
+            "ends_at": "07.07.2024",
+            "ts": 17202060000
+          },
+          {
+            "url": "/events/vladimir-abasev-voobrazaya-perm",
+            "href_extended": "https://permm.ru/~/vladimir-abashev-voobrazhaya-perm",
+            "media_url_extended": "/storage/media/37jX7iuTq84ExEsUCwYyTZ5qryNIRQ9qKpcznAch.jpg",
+            "title_extended": "Владимир Абашев: ВООБРАЖАЯ ПЕРМЬ",
+            "sub_title_extended": "Поздравляем любимый город с трехсот первым днем рождения и приглашаем прогуляться по символическому пространству Перми. Сегодня ищем образы Перми воображаемой в статье Владимира Абашева «Воображая Пермь».",
+            "starts_at": "12.06.2024",
+            "ends_at": null,
+            "ts": 17181324000
+          },
+          {
+            "url": "/events/nicego-ne-bylo-vidno-i-ostavalos-prislusivatsya",
+            "href_extended": "https://permm.ru/~/nichego-ne-bylo-vidno-i-ostavalos-prislushivatsya",
+            "media_url_extended": "/storage/media/C01YXE8jVfvX4v2WP27s7CrPtBklBXMAf0OZwX2C.jpg",
+            "title_extended": "Ничего не было видно и оставалось прислушиваться",
+            "sub_title_extended": "Друзья, на связи Наиля Аллахвердиева, сегодня, 9 мая, я хочу рассказать вам о важном проекте, созданном арт-группой «Нежные бабы» для мемориального комплекса села Майрамадаг в Северной Осетии в память о битве за Суарское ущелье.",
+            "starts_at": "09.05.2024",
+            "ends_at": null,
+            "ts": 17151948000
+          }
+        ],
+        [
+          {
+            "url": "/events/fenomen-graffiti-v-rossii-pervaya-rossiiskaya-konferenciya",
+            "href_extended": "https://permm.ru/~/fenomen-graffiti-v-rossii",
+            "media_url_extended": "/storage/media/ygQw93Tid1K2S3rrzdw7oGrEyEWhdaiHYIhxdmac.jpg",
+            "title_extended": "Первая российская конференция, посвященная граффити",
+            "sub_title_extended": "Музей PERMM совместно с Институтом исследования стрит-арта организует первую в России научную конференцию о граффити. Ее целью станет описание актуальной проблематики граффити в России.",
+            "starts_at": "12.04.2024",
+            "ends_at": "13.04.2024",
+            "ts": 17128620000
+          },
+          {
+            "url": "/events/start-intervyu-naili-allaxverdievoi",
+            "href_extended": "https://saint-art.net/kogda-ty-ugodil-v-shtorm-obratnoj-dorogi-net-nailya-allahverdieva/",
+            "media_url_extended": "/storage/media/vf2LAbINYG46yx9bA5gWjnu4lm4q6RhnOrRZZ2fc.jpg",
+            "title_extended": "ST.ART: Интервью Наили Аллахвердиевой",
+            "sub_title_extended": "Управление музеем для меня — это, в первую очередь, управление стратегией развития, и, в продолжение корабельной метафоры, директор музея — это капитан, прокладывающий путь к его светлому будущему.",
+            "starts_at": "05.04.2024",
+            "ends_at": null,
+            "ts": 17122572000
+          },
+          {
+            "url": "/events/permm-laureat-v-nominacii-muzei-goda-premii-the-art-newspaper-russia",
+            "href_extended": "https://www.theartnewspaper.ru/posts/20240312-wrsi/",
+            "media_url_extended": "/storage/media/yDiqYWc7zUY5KulaJTeeq77guHQZ6xOsOdFyCfBD.jpg",
+            "title_extended": "PERMM — лауреат в номинации «Музей года» премии The Art Newspaper Russia",
+            "sub_title_extended": "PERMM назван Музеем года «За энергичность, стойкость и умение быть в диалоге с публикой и городом». Торжественная церемония награждения прошла в Москве 13 марта. Награду получила директор музея PERMM Наиля Аллахвердиева.",
+            "starts_at": "13.03.2024",
+            "ends_at": null,
+            "ts": 17102700000
+          }
+        ],
+        [
+          {
+            "url": "/events/idauaeg-diany-sliman-pogruzenie-v-mirozdanie",
+            "href_extended": "https://permm.ru/~/shliman-idaueg",
+            "media_url_extended": "/storage/media/pGTMTurx8TRyruWTsoqqWECtmrrLsEs6HjZ3tGMV.jpg",
+            "title_extended": "«Идауæг» Дианы Шлиман: погружение в мироздание",
+            "sub_title_extended": "Вместо поздравительной открытки — проект Дианы Шлиман, созданный совместно с женщинами высокогорного села в Северной Осетии. История Наны — это легенда о женщине, которая спасает осетинских детей в разрушенном войной мире XIV века.",
+            "starts_at": "08.03.2024",
+            "ends_at": null,
+            "ts": 17098380000
+          },
+          {
+            "url": "/events/cvety-eduarda-kubenskogo",
+            "href_extended": "https://permm.ru/~/kubenskiy-tsvety",
+            "media_url_extended": "/storage/media/qAxb6aSyoeZv7Xq1kXx8JoBTtEbiMstLahjOgZy4.jpg",
+            "title_extended": "30 000 стреляных гильз: «Цветы» Эдуарда Кубенского",
+            "sub_title_extended": "Друзья, на связи Наиля Аллахвердиева, сегодня я хочу рассказать вам о проекте «Цветы» Эдуарда Кубенского, над которым мы работали с Анной Щербаковой в рамках 16-го фестиваля «Аланика», как кураторы и авторы концепции фестиваля.",
+            "starts_at": "23.02.2024",
+            "ends_at": null,
+            "ts": 17086284000
+          },
+          {
+            "url": "/events/budushhee-zdes-i-seicas-kakim-byl-nas-2023-god",
+            "href_extended": "https://permm.ru/~/kakim-byl-nash-2023",
+            "media_url_extended": "/storage/media/fnyDatiY4HS0QwTZBjkMAGs8eDn8oR3hx43y2Hq0.jpg",
+            "title_extended": "Будущее — здесь и сейчас. Каким был наш 2023 год",
+            "sub_title_extended": "Основное ощущение от уходящего года — максимально сжатое время. Оглядываясь назад и осмысляя количество дел, которые проделала команда PERMM, я не могу поверить, что мы уложились всего в 12 месяцев.",
+            "starts_at": "31.12.2023",
+            "ends_at": null,
+            "ts": 17039628000
+          }
+        ],
+        [
+          {
+            "url": "/events/fond-cosmoscow-popolnit-kollekciyu-permm",
+            "href_extended": "https://permm.ru/~/cosmoscow-kollektsiya",
+            "media_url_extended": "/storage/media/moXOZM8m1E5fJy1K2Wzoq1O2GWFWyaJqpKE2AP4e.jpg",
+            "title_extended": "Фонд Cosmoscow пополнит коллекцию PERMM",
+            "sub_title_extended": "В рамках программы «Музей года» Фонд поддержки современного искусства Cosmoscow выделил 1,8 млн рублей на пополнение коллекции PERMM. Музей отобрал 23 произведения российских художниц и одного художественного дуэта.",
+            "starts_at": "07.12.2023",
+            "ends_at": null,
+            "ts": 17018892000
+          },
+          {
+            "url": "/events/permm-stal-laureatom-premii-sdelano-v-rossii-2023-proekta-snob",
+            "href_extended": "https://snob.ru/news/nazvany-pobediteli-premii-snoba-sdelano-v-rossii-2023/",
+            "media_url_extended": "/storage/media/Jqv9ifo4ZLmgud0bUpUMTdjZbYETQtwbLonD9R4j.jpg",
+            "title_extended": "PERMM стал лауреатом премии «Сделано в России — 2023» проекта «Сноб»",
+            "sub_title_extended": "В этом году редакция, члены клуба и читатели «Сноба» выбирали победителей в 13 номинациях. PERMM стал лучшим в номинации «Городская среда». Поздравляем нашу команду и всю Пермь! Благодарим всех, кто отдал свой голос за PERMM.",
+            "starts_at": "29.11.2023",
+            "ends_at": null,
+            "ts": 17011980000
+          },
+          {
+            "url": "/events/otkrytie-muzeya-permm-v-zdanii-mersedes-centra",
+            "href_extended": "https://permm.ru/~/otkrytiye-permm-2023",
+            "media_url_extended": "/storage/media/lkdpfFt0pNRFbC1hE3PeU9bDJ6907vF3Y0DvTEbm.jpg",
+            "title_extended": "ОТКРЫТИЕ НОВОГО МУЗЕЯ PERMM",
+            "sub_title_extended": "В день открытия — 28 октября — мы представим сразу три премьерных проекта — новую интерпретацию музейной коллекции «И да, и нет», проект-исследование пермской современной музыки «Хранители огня» и инсталляцию Дмитрия Булныгина «Баньян».",
+            "starts_at": "28.10.2023",
+            "ends_at": null,
+            "ts": 16984332000
+          }
+        ],
+        [
+          {
+            "url": "/events/vip-preview-v-cest-otkrytiya-novogo-muzeya-permm",
+            "href_extended": "https://permm.ru/~/vip-preview-2023",
+            "media_url_extended": "/storage/media/UamVVhFRWKSADsVZCwFpiHO4BP3NZ7s3F6bzHDk4.jpg",
+            "title_extended": "Предпоказ и открытие нового музея PERMM",
+            "sub_title_extended": "27 и 28 октября состоялся предпоказ и открытие Нового музея PERMM в новом здании. Гостями превью стали кураторы, художники и руководители важнейших музеев и культурных институций России, а также партнеры и представители региональной власти.",
+            "starts_at": "27.10.2023",
+            "ends_at": null,
+            "ts": 16983468000
+          }
+        ]
+      ]
+    }
+  ]
+}
