@@ -410,6 +410,7 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         generic_llm_budget=settings.generic_llm_budget,
         generic_domain_budget=settings.generic_domain_budget,
         post_batch_size=settings.post_batch_size,
+        post_batch_max_chars=settings.post_batch_max_chars,
         mode_override=args.mode,
     )
     print(

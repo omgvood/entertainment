@@ -95,3 +95,45 @@ async def test_with_retry_recovers_after_one_rate_limit():
 
     assert result == "ok"
     assert calls["n"] == 2
+
+
+# Реальный текст ошибки Gemini free-tier при исчерпании суточной квоты (см. логи 02.07).
+_DAILY_QUOTA_MSG = (
+    "Gemini rate-limit для https://vk.com/x: 429 RESOURCE_EXHAUSTED. "
+    "Quota exceeded for metric: generate_content_free_tier_requests, "
+    "quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+)
+
+
+@pytest.mark.asyncio
+async def test_with_retry_does_not_retry_daily_quota():
+    # Суточная квота не восстановится через секунды → ретраить нельзя: factory зовётся 1 раз.
+    calls = {"n": 0}
+
+    async def factory():
+        calls["n"] += 1
+        raise RateLimitError(_DAILY_QUOTA_MSG)
+
+    with patch("parser.extraction.retry.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+        with pytest.raises(RateLimitError):
+            await with_retry(factory, attempts=3)
+
+    assert calls["n"] == 1  # без повторов, несмотря на attempts=3
+    sleep_mock.assert_not_called()  # без backoff-задержек
+
+
+@pytest.mark.asyncio
+async def test_daily_quota_switches_provider_immediately():
+    # Даже при retry_attempts=3 выгоревший по суточной квоте провайдер зовётся один раз,
+    # затем сразу фолбэк на следующего.
+    primary = _FakeExtractor(raises=RateLimitError(_DAILY_QUOTA_MSG))
+    secondary = _FakeExtractor(title="from-groq")
+    fb = FallbackExtractor([("gemini", primary), ("groq", secondary)], retry_attempts=3)
+
+    with patch("parser.extraction.retry.asyncio.sleep", new_callable=AsyncMock) as sleep_mock:
+        events = await fb.extract_many("doc", "https://t.me/x/1")
+
+    assert events[0].title == "from-groq"
+    assert primary.calls == 1  # ни одного повтора на выгоревшем провайдере
+    assert secondary.calls == 1
+    sleep_mock.assert_not_called()

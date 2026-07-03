@@ -20,11 +20,14 @@ EventType = Literal[
     "other",
 ]
 
+# Прикладные лимиты длины текстовых полей ParsedEvent (см. _truncate_text).
+_TEXT_LIMITS = {"title": 300, "description": 500}
+
 
 class ParsedEvent(BaseModel):
     """Извлечённое из HTML событие. То, что LLM обязан вернуть."""
 
-    title: str = Field(min_length=3, max_length=300)
+    title: str = Field(min_length=3)
     type: EventType
     category: Optional[str] = None
     date: str = Field(description="YYYY-MM-DD или 'always'")
@@ -38,7 +41,7 @@ class ParsedEvent(BaseModel):
     venue_name: str
     district: Optional[str] = None
     image_url: Optional[str] = None
-    description: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = Field(default=None)
     organizer: Optional[str] = None
     event_url: Optional[str] = Field(
         default=None,
@@ -48,6 +51,15 @@ class ParsedEvent(BaseModel):
         default_factory=list,
         description="Теги из закрытого набора taxonomy.ALLOWED_TAGS (для подборок/рекомендаций)",
     )
+
+    @field_validator("title", "description", mode="before")
+    @classmethod
+    def _truncate_text(cls, v, info):
+        # Прикладной лимит длины (карточка на фронте), не constraint БД (там text). Раньше
+        # стоял max_length у Field, но он ронял ВЕСЬ item при переполнении (одно длинное поле
+        # → потеря события). Режем срезом до валидации; срез безопасен и на None/не-строке.
+        limit = _TEXT_LIMITS[info.field_name]
+        return v[:limit] if isinstance(v, str) else v
 
     @field_validator("tags")
     @classmethod

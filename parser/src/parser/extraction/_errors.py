@@ -24,3 +24,20 @@ def is_rate_limit(exc: BaseException) -> bool:
             "unavailable", "overloaded", "request too large", "tokens per minute",
         )
     )
+
+
+def is_daily_quota_exhausted(exc: BaseException) -> bool:
+    """True, если rate-limit — это исчерпанная СУТОЧНАЯ квота, а не временная перегрузка.
+
+    Отличие важно: временный 503/429 (модель перегружена, TPM) лечится ретраем через
+    секунды; дневная квота (Gemini free-tier: 20 запросов/сутки на модель) до конца суток не
+    восстановится — ретраить бессмысленно, надо сразу переходить к следующему провайдеру.
+
+    Ограничение подхода: матчинг завязан на текущий текст ошибки Gemini SDK
+    ('quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier' / 'per day'). Если провайдер
+    изменит формат сообщения, паттерн потребует обновления — держать в уме при отладке.
+    """
+    s = str(exc).lower()
+    return "generaterequestsperdayperprojectpermodel" in s or (
+        "quota" in s and "per day" in s
+    )

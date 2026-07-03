@@ -52,10 +52,37 @@ log = structlog.get_logger()
 _POST_CONCURRENCY = 2
 
 
-def _chunks(seq: list, size: int):
-    """Разбивает список на пачки по size элементов."""
-    for i in range(0, len(seq), size):
-        yield seq[i : i + size]
+def _chunks_by_budget(
+    seq: list[tuple[str, str]], max_chars: int, max_count: int
+):
+    """Батчинг постов по объёму текста, а не только по фиксированному счётчику.
+
+    Жадно набирает пачку, пока добавление следующего поста не превысит max_chars ИЛИ пока
+    не достигнут max_count. Короткие посты паковываются плотнее (меньше LLM-вызовов, экономия
+    квоты), длинные — остаются малыми пачками (не путают модель, не ловят TPM/503).
+
+    Элементы — пары (url, text); бюджет считается по длине text. Инварианты:
+    - каждый элемент попадает ровно в одну пачку, порядок сохранён;
+    - пачка никогда не пустая;
+    - пост, чей text сам по себе длиннее max_chars, уходит отдельной (непустой) пачкой
+      целиком — не дробится и не отбрасывается (иначе риск пустых пачек/зацикливания).
+    Один проход, O(n) по числу элементов.
+    """
+    batch: list[tuple[str, str]] = []
+    size = 0
+    for item in seq:
+        item_chars = len(item[1])
+        # Закрываем текущую пачку до добавления, если она непуста и элемент её переполнит
+        # (по объёму или по счётчику). Пустую пачку не закрываем — так одиночный сверхдлинный
+        # пост попадёт в свою пачку, а не потеряется.
+        if batch and (size + item_chars > max_chars or len(batch) >= max_count):
+            yield batch
+            batch = []
+            size = 0
+        batch.append(item)
+        size += item_chars
+    if batch:
+        yield batch
 
 
 def _hash_html(html: str, *, playwright: bool = False) -> str:
@@ -181,6 +208,7 @@ async def run_city(
     generic_llm_budget: int = 10,
     generic_domain_budget: int = 20,
     post_batch_size: int = 5,
+    post_batch_max_chars: int = 7000,
     mode_override: str | None = None,
 ) -> PipelineResult:
     """Полный прогон по одному городу. supabase=None при --dry-run.
@@ -225,11 +253,12 @@ async def run_city(
             elif mode == "vk_posts":
                 rows, sub = await _run_vk_posts_source(
                     client, source, extractor, supabase, city.slug, vk_service_key, dry_run,
-                    post_batch_size,
+                    post_batch_size, post_batch_max_chars,
                 )
             elif mode == "telegram_posts":
                 rows, sub = await _run_telegram_posts_source(
-                    client, source, extractor, supabase, city.slug, dry_run, post_batch_size
+                    client, source, extractor, supabase, city.slug, dry_run,
+                    post_batch_size, post_batch_max_chars,
                 )
             elif mode == "generic":
                 rows, sub = await _run_generic_source(
@@ -574,11 +603,13 @@ async def _run_vk_posts_source(
     vk_service_key: str | None,
     dry_run: bool,
     post_batch_size: int,
+    post_batch_max_chars: int,
 ) -> tuple[list[EventRow], PipelineResult]:
     """Посты со стен кураторских VK-сообществ → префильтр → LLM (1 вызов на пачку постов).
 
     source_url события — ссылка на конкретный пост (event_url из маркера / фолбэк на группу).
-    Посты идут пачками по post_batch_size, пачки — параллельно с ограничением _POST_CONCURRENCY.
+    Посты идут пачками по объёму текста (post_batch_max_chars, потолок post_batch_size постов),
+    пачки — параллельно с ограничением _POST_CONCURRENCY.
     """
     sub = PipelineResult()
     if not vk_service_key:
@@ -624,13 +655,13 @@ async def _run_vk_posts_source(
         if not candidates:
             continue
 
-        # Малые батчи: пачки по post_batch_size постов на LLM-вызов (экономия квоты), маркер
-        # «=== POST <url> ===» закрепляет event_url за постом. Параллелим с семафором.
+        # Батчи по объёму текста (экономия квоты без риска путаницы/TPM на длинных постах),
+        # маркер «=== POST <url> ===» закрепляет event_url за постом. Параллелим с семафором.
         group_url = f"https://vk.com/{screen}"
         sem = asyncio.Semaphore(_POST_CONCURRENCY)
         tasks = [
             _extract_chunk(extractor, chunk, group_url, sem)
-            for chunk in _chunks(candidates, post_batch_size)
+            for chunk in _chunks_by_budget(candidates, post_batch_max_chars, post_batch_size)
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -690,6 +721,7 @@ async def _run_telegram_posts_source(
     city_slug: str,
     dry_run: bool,
     post_batch_size: int,
+    post_batch_max_chars: int,
 ) -> tuple[list[EventRow], PipelineResult]:
     """Посты публичных Telegram-каналов (t.me/s/) → префильтр → LLM (1 вызов на пачку постов).
 
@@ -740,12 +772,12 @@ async def _run_telegram_posts_source(
         if not candidates:
             continue
 
-        # Малые батчи: см. _run_vk_posts_source. base_url = канал — фолбэк атрибуции.
+        # Батчи по объёму текста: см. _run_vk_posts_source. base_url = канал — фолбэк атрибуции.
         channel_url = f"https://t.me/{ch.channel}"
         sem = asyncio.Semaphore(_POST_CONCURRENCY)
         tasks = [
             _extract_chunk(extractor, chunk, channel_url, sem)
-            for chunk in _chunks(candidates, post_batch_size)
+            for chunk in _chunks_by_budget(candidates, post_batch_max_chars, post_batch_size)
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 

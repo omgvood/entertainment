@@ -63,7 +63,13 @@ class Settings:
     generic_domain_budget: int = 20
     """Макс. число доменов на прогон в generic-источнике (защита времени прогона)."""
     post_batch_size: int = 5
-    """Сколько VK/TG-постов склеивать в один LLM-вызов (баланс квоты и точности атрибуции)."""
+    """Верхняя граница числа VK/TG-постов в одном LLM-вызове (баланс квоты и точности атрибуции)."""
+    post_batch_max_chars: int = 7000
+    """Верхняя граница суммарной длины постов в одном батче. Батчинг идёт по объёму текста
+    (не только по счётчику): короткие посты паковываются плотнее, длинные — малыми пачками.
+    Значение консервативное — оставляет запас под system-промпт, инструкции по датам/тегам и
+    JSON-ответ модели (в контекст уходит не только текст постов). 7000 — стартовое, батчи
+    такого порядка проходили успешно; корректируется по логам, а не высечено в камне."""
     llm_provider: LlmProvider = "gemini"
     llm_fallback_providers: str = "gemini,groq"
     """Цепочка провайдеров через запятую (порядок = приоритет). При 429/503 переключаемся на
@@ -127,6 +133,7 @@ class Settings:
             generic_llm_budget=int(os.environ.get("GENERIC_LLM_BUDGET", "10")),
             generic_domain_budget=int(os.environ.get("GENERIC_DOMAIN_BUDGET", "20")),
             post_batch_size=int(os.environ.get("POST_BATCH_SIZE", "5")),
+            post_batch_max_chars=int(os.environ.get("POST_BATCH_MAX_CHARS", "7000")),
             llm_provider=provider_raw,  # type: ignore[arg-type]
             llm_fallback_providers=os.environ.get("LLM_FALLBACK_PROVIDERS", "gemini,groq"),
             llm_retry_attempts=int(os.environ.get("LLM_RETRY_ATTEMPTS", "3")),

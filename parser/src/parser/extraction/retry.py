@@ -8,6 +8,7 @@ from typing import Awaitable, Callable, TypeVar
 
 import structlog
 
+from ._errors import is_daily_quota_exhausted
 from .base import RateLimitError
 
 
@@ -32,6 +33,11 @@ async def with_retry(
             return await factory()
         except RateLimitError as exc:
             last = exc
+            # Дневная квота (не временная перегрузка) до конца суток не восстановится —
+            # ретраить бессмысленно, сразу пробрасываем, чтобы фолбэк переключил провайдера.
+            if is_daily_quota_exhausted(exc):
+                log.debug("llm.retry.skip_daily_quota", error=str(exc)[:120])
+                raise
             if attempt < attempts - 1:
                 delay = base_delay * (2**attempt) + random.uniform(0.5, 1.5)
                 log.debug("llm.retry", attempt=attempt + 1, delay=round(delay, 2), error=str(exc)[:120])

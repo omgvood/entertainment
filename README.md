@@ -123,6 +123,9 @@ Vercel CDN ← пользователь
 | **Фильтр spurious `always`** | LLM ставил `date='always'` постам VK/Telegram/generic без явной даты (анонс выставки/«каждую пятницу») — такие карточки засоряли БД и скрывались фронтом. Три слоя защиты: (1) общее правило в промпте запрещает `always` для постов; (2) постфильтр `is_spurious_always` в петлях VK/TG отбраковывает их до записи (счётчик `skipped_always` → `source_health`); (3) guard в `to_event_row` (`→ EventRow \| None`) — последний рубеж для всех веток, включая generic. Площадки (`bowling`/`billiards`/`karting`/`quest`) исключены — им `always` легитимен. Накопленное вычищено миграцией | `extraction/prompts.py`, `validator.is_spurious_always`, `pipeline._safe_to_event_row`, `config.SOCIAL_SOURCE_PREFIXES`/`ALLOWED_ALWAYS_EVENT_TYPES`, миграция `…_remove_always_vk_tg.sql` |
 | **Синхронизация отмен** | Источники с `full_snapshot: true` (QuizPlease) дают полный срез за один вызов. После прогона `sync_source_events` удаляет из БД будущие события источника, которые пропали из ответа API — т.е. отменены. Защита от сбоя: при пустом результате синхронизация пропускается с WARNING. Прошедшие события удаляет TTL (1 день) | `db.sync_source_events`, `pipeline.py`, `config.SourceConfig.full_snapshot`, `seeds.yaml` |
 | **Миграция Groq → gpt-oss** | Groq декоммиссит `llama-3.1-8b-instant` и `llama-3.3-70b-versatile` **16.08.2026**. Дефолт Groq переведён на `openai/gpt-oss-120b` (замена 70b; у gpt-oss-20b/120b одинаковый free-tier 8K TPM, взяли мощнее). На free-tier batch-вызов почти всегда упирается в 8K TPM (фикс. оверхед: system-промпт ~2k + `max_tokens` ≈ лимит) → `413 … tokens per minute`. Это лимит, а не размер входа: `is_rate_limit` относит такой 413 к rate-limit → `RateLimitError` → фолбэк на Gemini. Также `max_tokens` batch снижен 8000→4000. Single-extract на Groq работает. Проверено dry-run | `config.DEFAULT_MODELS`, `groq_extractor.GroqExtractor`, `extraction/_errors.is_rate_limit` |
+| **Truncate текстовых полей** | `title`/`description` длиннее лимита (300/500) раньше роняли **весь** `ParsedEvent` через `max_length` у `Field` (одно длинное поле → потеря события; в логах — россыпь `extract.batch.item_invalid … string_too_long`). Лимит прикладной (карточка на фронте), не constraint БД (там `text`). Теперь `field_validator(mode="before")` режет строку срезом до валидации — событие сохраняется усечённым | `models.ParsedEvent._truncate_text`, `models._TEXT_LIMITS` |
+| **Батчинг постов по объёму текста** | VK/TG-посты клеились в LLM-вызов пачками фиксированного размера (`POST_BATCH_SIZE`), не считаясь с длиной. Теперь батч набирается жадно по суммарным символам (`POST_BATCH_MAX_CHARS`, дефолт 7000) с потолком по счётчику: короткие посты паковываются плотнее (меньше вызовов → экономия дневной квоты Gemini), длинные — малыми пачками (без путаницы модели/TPM). Сверхдлинный пост уходит отдельной пачкой целиком | `pipeline._chunks_by_budget`, `config.Settings.post_batch_max_chars` |
+| **Fast-fail на суточной квоте** | При исчерпании дневной квоты Gemini free-tier (20 запросов/сутки на модель, `RESOURCE_EXHAUSTED` + `GenerateRequestsPerDayPerProjectPerModel`) `with_retry` раньше делал 3 бесполезных ретрая с backoff — квота до конца суток не восстановится. Теперь такой лимит отличается от временной перегрузки (503/TPM) и пробрасывается сразу → `FallbackExtractor` без задержки переключается на следующего провайдера | `extraction/_errors.is_daily_quota_exhausted`, `extraction/retry.with_retry` |
 
 Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
 
@@ -154,8 +157,8 @@ entertainment/
 │   │   │   └── sitemap.py          — краулер sitemap.xml
 │   │   ├── extraction/
 │   │   │   ├── base.py             — LLMExtractor ABC + ExtractorError/RateLimitError
-│   │   │   ├── _errors.py          — is_rate_limit: классификация 429/503 SDK-исключений
-│   │   │   ├── retry.py            — with_retry: backoff+jitter на RateLimitError
+│   │   │   ├── _errors.py          — is_rate_limit (429/503) + is_daily_quota_exhausted (суточная квота)
+│   │   │   ├── retry.py            — with_retry: backoff+jitter на RateLimitError (суточную квоту не ретраит)
 │   │   │   ├── fallback.py         — FallbackExtractor: ретрай + фолбэк цепочки провайдеров
 │   │   │   ├── jsonld.py           — Schema.org JSON-LD парсер (перед LLM, без LLM)
 │   │   │   ├── prompts.py          — общие фрагменты промптов (DATE_ALWAYS_INSTRUCTIONS)
@@ -182,11 +185,12 @@ entertainment/
 │   ├── tests/                      — pytest тесты
 │   │   ├── conftest.py             — фикстуры (Supabase-заглушки, sample HTML)
 │   │   ├── test_pipeline_warnings.py — изоляция warnings/last_error между источниками в run_city
+│   │   ├── test_pipeline_batching.py — _chunks_by_budget (батчинг постов по объёму текста)
 │   │   ├── test_classifiers.py     — is_event_candidate (VK/Telegram/типы источников)
 │   │   ├── test_db.py              — upsert_events, upsert_venues, WriteStats
 │   │   ├── test_discovery.py       — ListingDiscovery, SitemapDiscovery
 │   │   ├── test_extractors.py      — DeepSeekExtractor (mock LLM) + is_rate_limit
-│   │   ├── test_fallback.py        — FallbackExtractor (фолбэк/проброс/исчерпание) + with_retry
+│   │   ├── test_fallback.py        — FallbackExtractor (фолбэк/проброс/исчерпание) + with_retry (в т.ч. суточная квота без ретрая)
 │   │   ├── test_generic.py         — generic-парсер (load_approved_domains, resolve_listing_url)
 │   │   ├── test_jsonld.py          — extract_jsonld_events (Schema.org JSON-LD)
 │   │   ├── test_kudago.py          — KudaGoClient (маппинг категорий)
@@ -196,7 +200,7 @@ entertainment/
 │   │   ├── test_spurious_always.py — is_spurious_always, guard to_event_row, _safe_to_event_row, промпты
 │   │   ├── test_timepad.py         — TimepadClient._map_category, пагинация
 │   │   ├── test_url_utils.py       — resolve_event_url (относит./мусор/поддомены/фолбэк)
-│   │   ├── test_validator.py       — to_event_row, slug, fingerprint, to_venue
+│   │   ├── test_validator.py       — to_event_row, slug, fingerprint, to_venue, усечение title/description
 │   │   └── test_vk.py              — VkClient, event_group_to_parsed, fetch_wall_posts
 │   ├── pyproject.toml              — зависимости и настройки пакета
 │   └── README.md                   — документация парсера
@@ -304,12 +308,18 @@ entertainment/
   (`serper,brave,duckduckgo`); `SERPER_API_KEY`, `BRAVE_API_KEY` — ключи keyed-провайдеров;
   `SEARCH_TIMEOUT_SECONDS` (дефолт 20), `SEARCH_QUERY_LIMIT` (дефолт — по числу шаблонов)
 - `GENERIC_LLM_BUDGET` (дефолт 10), `GENERIC_DOMAIN_BUDGET` (дефолт 20) — лимиты generic-парсера
-- `POST_BATCH_SIZE` (дефолт 5) — сколько VK/TG-постов склеивать в один LLM-вызов. Оптимально для
-  Gemini (основной провайдер, лимиты выше). На Groq free-tier (8K TPM) batch-вызов почти всегда
-  упирается в TPM и уходит на фолбэк (Gemini), поэтому параметр под Groq не подгоняем — он про Gemini
+- `POST_BATCH_SIZE` (дефолт 5) — **верхняя граница** числа VK/TG-постов в одном LLM-вызове.
+  Оптимально для Gemini (основной провайдер, лимиты выше). На Groq free-tier (8K TPM) batch-вызов
+  почти всегда упирается в TPM и уходит на фолбэк (Gemini), поэтому параметр под Groq не подгоняем
+- `POST_BATCH_MAX_CHARS` (дефолт 7000) — **бюджет по объёму текста** для одного батча постов.
+  Батчинг идёт жадно по суммарным символам (потолок — `POST_BATCH_SIZE`): короткие посты
+  паковываются плотнее (экономия дневной квоты), длинные — малыми пачками. Значение консервативное —
+  оставляет запас под system-промпт, инструкции и JSON-ответ модели; корректируется по логам
 - `LLM_PROVIDER` (gemini / groq / deepseek, дефолт: gemini) — основной провайдер
 - `LLM_FALLBACK_PROVIDERS` (дефолт `gemini,groq`) — цепочка для ретрая/фолбэка при 429/503
-- `LLM_RETRY_ATTEMPTS` (дефолт 3) — попыток на провайдера при rate-limit перед переключением
+- `LLM_RETRY_ATTEMPTS` (дефолт 3) — попыток на провайдера при rate-limit перед переключением.
+  Исключение — исчерпанная суточная квота (`is_daily_quota_exhausted`): она не восстановится за
+  время ретрая, поэтому пробрасывается сразу, без повторов, к следующему провайдеру
 - `GEMINI_MODEL`, `GROQ_MODEL`, `DEEPSEEK_MODEL` — модели провайдеров
 
 **`SourceConfig`** — конфигурация одного источника из `seeds.yaml`:
@@ -366,8 +376,8 @@ cities:
 - `playwright_listing` — то же что `batch_listing`, но страница рендерится headless-браузером (Playwright) перед извлечением. **Для SPA** (Nuxt/Next/React), где статический HTML пуст: браузер исполняет JS, отдаёт готовый DOM → дальше та же цепочка JSON-LD → LLM. Режим доступен, но сейчас не используется: `permopera.ru`/`permm.ru` оказались SPA с открытым JSON-API и переведены на `direct_api` (дешевле и надёжнее)
 - `per_url` — дискавери находит N URL, затем N отдельных LLM-вызовов для каждого
 - `vk_events` — VK-сообщества типа «событие» (нативные `start_date`/`place`) → `ParsedEvent` без LLM
-- `vk_posts` — посты со стен `vk_groups`: префильтр (дата/маркеры/билеты) → `extract_many` пачками по `POST_BATCH_SIZE` постов (параллельно, с ограничением `_POST_CONCURRENCY`)
-- `telegram_posts` — посты публичных каналов `telegram_sources` (веб-превью `t.me/s/`, без авторизации): префильтр (строгость по `source_type`) → `extract_many` пачками по `POST_BATCH_SIZE` постов
+- `vk_posts` — посты со стен `vk_groups`: префильтр (дата/маркеры/билеты) → `extract_many` пачками по объёму текста (`POST_BATCH_MAX_CHARS`, потолок `POST_BATCH_SIZE` постов) (параллельно, с ограничением `_POST_CONCURRENCY`)
+- `telegram_posts` — посты публичных каналов `telegram_sources` (веб-превью `t.me/s/`, без авторизации): префильтр (строгость по `source_type`) → `extract_many` пачками по объёму текста (`POST_BATCH_MAX_CHARS`, потолок `POST_BATCH_SIZE` постов)
 - `generic` — одобренные в `candidate_sources` домены: JSON-LD, иначе LLM в пределах бюджета (длинный хвост)
 
 ---
@@ -380,7 +390,7 @@ cities:
 
 | Поле | Тип | Описание |
 |------|-----|---------|
-| `title` | str (3-300 символов) | Название события |
+| `title` | str (≥3, режется до 300) | Название события; длиннее лимита — усекается срезом, не роняет событие |
 | `type` | EventType | Тип события |
 | `date` | str | `YYYY-MM-DD` или `always` |
 | `price_min` / `price_max` | int ≥ 0 | Диапазон цен |
@@ -389,13 +399,15 @@ cities:
 | `venue_name` | str | Название площадки |
 | `time_start` / `time_end` | str? | Время `HH:MM` (опционально) |
 | `image_url` | str? | URL изображения ≤ 500 символов |
-| `description` | str? | Описание ≤ 500 символов |
+| `description` | str? | Описание; длиннее 500 символов — усекается срезом (не роняет событие, см. `_truncate_text`) |
 | `organizer` | str? | Организатор |
 | `district` | str? | Район города |
 | `event_url` | str? | Прямая ссылка на страницу/пост события (промежуточное поле, в БД не пишется — резолвится в `source_url`, см. ниже) |
 | `tags` | list[str] | Теги из закрытого набора `taxonomy.ALLOWED_TAGS` (валидатор отбрасывает чужие) |
 
-Валидаторы: формат даты, формат времени, `price_max >= price_min`, фильтрация тегов.
+Валидаторы: формат даты, формат времени, `price_max >= price_min`, фильтрация тегов,
+усечение `title`/`description` до лимита (`_truncate_text`, `mode="before"` — режет срезом до
+проверки типов, чтобы длинное поле не роняло весь `ParsedEvent`).
 
 > **`event_url` → `source_url`.** LLM/JSON-LD возвращают `event_url` — прямую ссылку на конкретное
 > событие (из маркера `=== POST <url> ===` для VK/TG, из `<a href>`/JSON-LD `url`/`@id` для web).
@@ -682,7 +694,8 @@ VK/Telegram/batch/generic — чтобы кнопка «Перейти к ист
   ключе** (`wall.get` доступен; закрытые группы пропускаются по `VkApiError`). Перед LLM — **префильтр**
   `classifiers.is_event_candidate()` (есть дата/время, маркеры «билеты»/«регистрация»/«вход», ссылка на Timepad)
   и фильтр свежести 14 дней; дедуп постов через `raw_documents` (хеш текста). Посты-кандидаты
-  (≤20/группу) бьются на пачки по `POST_BATCH_SIZE` (дефолт 5) → один `extract_many` на пачку,
+  (≤20/группу) бьются на пачки по объёму текста (`_chunks_by_budget`: до `POST_BATCH_MAX_CHARS`
+  символов, потолок `POST_BATCH_SIZE` постов) → один `extract_many` на пачку,
   пачки параллельно с `_POST_CONCURRENCY`. Каждый пост в пачке помечается маркером
   `=== POST <url> ===` (промпты ОБЯЗАНЫ брать из него `event_url`) → `resolve_event_url`; пусто →
   фолбэк на группу. `save_raw_document` — только при успешном возврате пачки (включая пустой
@@ -707,7 +720,7 @@ Telegram-каналы локальных организаторов (стенд�
   объекты `TelegramChannelConfig` (можно отключать/менять приоритет). Префильтр
   `classifiers.is_event_candidate(text, source_type)` — **строгость зависит от типа канала**: у агрегатора
   (много рекламы/мемов) нужна дата И маркер, у организатора достаточно одного сигнала. Свежесть 14 дней,
-  дедуп через `raw_documents`, `extract_many` пачками по `POST_BATCH_SIZE` (параллельно, `_POST_CONCURRENCY`).
+  дедуп через `raw_documents`, `extract_many` пачками по объёму текста (`_chunks_by_budget`: до `POST_BATCH_MAX_CHARS`, потолок `POST_BATCH_SIZE`; параллельно, `_POST_CONCURRENCY`).
   `source_url` события — **прямая ссылка на конкретный пост** (`https://t.me/{channel}/{id}`): пост помечается
   маркером `=== POST <url> ===`, LLM возвращает его в `event_url`, а `resolve_event_url` подставляет в `source_url`.
   Фолбэк — на `post_url` самого поста, а не на канал (см. «Резолв `source_url`» выше).
@@ -792,6 +805,13 @@ Telegram-каналы локальных организаторов (стенд�
   по подстрокам в тексте (`resource_exhausted`, `unavailable`, `overloaded`, `429`, `503`) — на
   случай, если SDK обернул ошибку без кода. Экстракторы зовут её в `except` блоках API-вызова и
   поднимают `RateLimitError` вместо `ExtractorError`, когда она вернула `True`.
+- **`is_daily_quota_exhausted(exc) -> bool`** — уточняет *природу* лимита: это исчерпанная
+  **суточная** квота (Gemini free-tier, 20 запросов/сутки на модель) или временная перегрузка?
+  Матчит текст ошибки (`generaterequestsperdayperprojectpermodel` / `quota … per day`). Суточная
+  квота до конца суток не восстановится → ретрай бесполезен, `with_retry` пробрасывает её сразу.
+  ⚠️ Матчинг завязан на текущий формат сообщения Gemini SDK — при его изменении паттерн потребует
+  обновления. Если поводов различать лимиты станет больше (minute/token/project quota), плоский
+  набор bool-функций стоит заменить на одну классификацию (`RateLimitKind` enum).
 
 ---
 
@@ -801,7 +821,9 @@ Telegram-каналы локальных организаторов (стенд�
   **только** на `RateLimitError`. Экспоненциальный backoff + **jitter** (`base*2**n + random(0.5,1.5)`)
   — jitter разносит синхронно проснувшиеся корутины, чтобы не бить API одновременно и не продлевать
   429. После `attempts` попыток пробрасывает последний `RateLimitError`. `attempts` берётся из
-  `LLM_RETRY_ATTEMPTS`.
+  `LLM_RETRY_ATTEMPTS`. **Исключение:** если `is_daily_quota_exhausted(exc)` — не спит и не повторяет,
+  пробрасывает сразу (эквивалент `attempts=1`), чтобы `FallbackExtractor` без задержки перешёл к
+  следующему провайдеру, а не жёг попытки на выгоревшей до завтра квоте.
 
 ---
 
@@ -1069,7 +1091,8 @@ source.vk_groups = ["perm_afisha", "kudago_perm", ...]
   │   │     classifiers.py: есть дата/время ИЛИ маркеры «билеты»/«вход»/«регистрация»
   │   └── raw_documents: SHA-256(text) уже видели? → ПРОПУСТИТЬ (дедуп поста)
   │
-  │   Берём до 20 кандидатов, бьём на пачки по POST_BATCH_SIZE (дефолт 5):
+  │   Берём до 20 кандидатов, бьём на пачки по объёму текста (POST_BATCH_MAX_CHARS,
+  │   потолок POST_BATCH_SIZE):
   │   «=== POST https://vk.com/wall{owner}_{id} ===\n{text}\n\n=== POST … ===\n…»
   │
   │   asyncio.gather(extractor.extract_many(chunk_doc, group_url) ...)
@@ -1139,7 +1162,8 @@ source.telegram_sources = [{channel, source_type, priority, enabled}, ...]
   │   │     source_type=organizer:  достаточно одного сигнала (сам анонсирует)
   │   └── raw_documents: SHA-256(text) видели? → ПРОПУСТИТЬ (дедуп поста)
   │
-  │   Берём до 20 кандидатов, бьём на пачки по POST_BATCH_SIZE (дефолт 5):
+  │   Берём до 20 кандидатов, бьём на пачки по объёму текста (POST_BATCH_MAX_CHARS,
+  │   потолок POST_BATCH_SIZE):
   │   «=== POST https://t.me/{channel}/{id} ===\n{text}\n\n=== POST … ===\n…»
   │
   │   asyncio.gather(extractor.extract_many(chunk_doc, channel_url) ...)
@@ -1266,7 +1290,9 @@ ORDER BY score DESC LIMIT GENERIC_DOMAIN_BUDGET (дефолт 20)
   (`resource_exhausted`, `unavailable`, `overloaded`). Экстракторы кидают `RateLimitError`
   (подкласс `ExtractorError`) на лимит, обычный `ExtractorError` — на контент/парс.
 - **Ретрай** (`retry.with_retry`): на `RateLimitError` — экспоненциальный backoff + jitter,
-  `LLM_RETRY_ATTEMPTS` попыток на провайдера.
+  `LLM_RETRY_ATTEMPTS` попыток на провайдера. Исчерпанная **суточная** квота
+  (`is_daily_quota_exhausted`) — исключение: не ретраится (до завтра не восстановится),
+  пробрасывается сразу к фолбэку.
 - **Фолбэк** (`FallbackExtractor`): цепочка `LLM_FALLBACK_PROVIDERS` (дефолт `gemini,groq`).
   При исчерпании ретраев у провайдера — переход к следующему. Индекс `_preferred_idx` сдвигается
   вперёд (advance-only, без Lock — asyncio однопоточный), чтобы следующие вызовы не били

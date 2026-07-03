@@ -65,3 +65,38 @@ def test_parsed_event_rejects_price_min_gt_max():
             venue_name="X",
             image_url="https://x",
         )
+
+
+def _event_with(title="Событие", description=None):
+    return ParsedEvent(
+        title=title,
+        type="concert",
+        date="2026-06-01",
+        price_min=0,
+        price_max=0,
+        price_text="бесплатно",
+        address="X",
+        venue_name="X",
+        description=description,
+    )
+
+
+import pytest
+
+
+@pytest.mark.parametrize("length,expected", [(299, 299), (300, 300), (301, 300)])
+def test_title_truncated_at_boundary(length, expected):
+    # Раньше title>300 ронял весь ParsedEvent (max_length у Field). Теперь режется срезом.
+    ev = _event_with(title="а" * length)
+    assert len(ev.title) == expected
+
+
+@pytest.mark.parametrize("length,expected", [(499, 499), (500, 500), (501, 500)])
+def test_description_truncated_at_boundary(length, expected):
+    # Ключевой баг из логов: description>500 выбрасывал событие целиком. Теперь усекается.
+    ev = _event_with(description="б" * length)
+    assert len(ev.description) == expected
+
+
+def test_description_none_stays_none():
+    assert _event_with(description=None).description is None
