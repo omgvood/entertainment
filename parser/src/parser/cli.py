@@ -422,6 +422,29 @@ async def _cmd_run(args: argparse.Namespace) -> int:
     if result.merged_by_source:
         print(f"  merge по источникам: {result.merged_by_source}")
 
+    if result.source_quality:
+        print("\n=== Качество источников (unique = выиграли merge) ===")
+        items = sorted(
+            result.source_quality.items(),
+            key=lambda x: (x[1].get("ratio") or 0, -x[1]["found"]),
+        )
+        bar_width = 20
+        for src, m in items:
+            found, unique, ratio = m["found"], m["unique"], m.get("ratio")
+            if found == 0:
+                continue
+            label = src.removeprefix("generic:")[:34]
+            filled = int((ratio or 0) * bar_width)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            print(f"  {label:<34} {found:>4} найд | {unique:>4} уник | {bar} {(ratio or 0):6.1%}")
+
+        ratios = [m["ratio"] for m in result.source_quality.values() if m["ratio"] is not None]
+        if ratios:
+            print(f"  Avg ratio: {sum(ratios) / len(ratios):.1%} ({len(ratios)} источников)")
+
+        if args.dry_run:
+            print("  ⚠️  dry-run: merged_by_source может быть неполным (без данных из БД)")
+
     # Предупреждения (напр. протухший токен Timepad) пишем в файл — GHA читает его и
     # шлёт Telegram-алерт, даже если прогон формально успешен (упал один источник из многих).
     if result.warnings:

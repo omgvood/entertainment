@@ -381,11 +381,11 @@ def record_source_health(
 # --- source_quality (Analytics): ценность источника (доля уникальных событий) ---
 
 def record_source_quality(
-    client: Client, city: str, per_source: dict[str, tuple[int, int]]
+    client: Client, city: str, per_source: dict[str, dict]
 ) -> None:
     """Снимок ценности источников за сегодня.
 
-    per_source: {source_name: (events_found, unique_events)}, где unique = не проигравшие
+    per_source: {source_name: {found, unique, ratio}}, где unique = не проигравшие
     кросс-источниковый merge другому источнику. Низкий ratio → источник дублирует другие.
     """
     try:
@@ -395,12 +395,12 @@ def record_source_quality(
                 "source": source,
                 "city": city,
                 "snapshot_date": today,
-                "events_found": found,
-                "unique_events": unique,
-                "unique_events_ratio": round(unique / found, 3) if found else None,
+                "events_found": m["found"],
+                "unique_events": m["unique"],
+                "unique_events_ratio": m["ratio"],
             }
-            for source, (found, unique) in per_source.items()
-            if found
+            for source, m in per_source.items()
+            if m["found"]
         ]
         if payload:
             client.table("source_quality").upsert(

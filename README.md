@@ -112,7 +112,7 @@ Vercel CDN ← пользователь
 | **Cross-source merge** | Слияние дублей одного события из разных источников по `id` с учётом `priority` и обогащением пустых полей | `merge.py`, `pipeline.py` |
 | **Raw Documents** | Хранение сырья (HTML/JSON) для перепарса без повторного краулинга; здесь же хеш для дедупа | `db.py` (`save_raw_document`), таблица `raw_documents` |
 | **Source Health** | Лог + агрегат по источникам: `events_found`, `errors`, `duration_sec`, `success_rate` | `db.py` (`record_source_health`), таблицы `source_health*` |
-| **Source Quality** | Ежедневный снимок ценности источника: `unique_events_ratio` (сколько событий уникальны, а сколько дублируют другие источники в merge) — видно, стоит ли держать источник | `db.py` (`record_source_quality`), таблица `source_quality` |
+| **Source Quality** | Ежедневный снимок ценности источника: `unique_events_ratio` (сколько событий уникальны, а сколько дублируют другие источники в merge) — видно, стоит ли держать источник. **Видна в stdout** (ASCII-таблица в конце прогона) + warning при `ratio < 0.3` → Telegram | `db.py` (`record_source_quality`), `pipeline._source_quality`, `cli.py`, таблица `source_quality` |
 | **Coverage Stats** | Ежедневный снимок покрытия по категориям — видно тренды и выпадение категорий | `db.py` (`record_coverage`), таблица `coverage_stats` |
 | **Source priority** | Приоритет источника для разрешения дублей в merge | `config.py` (`SourceConfig.priority`) |
 | **Venues (площадки)** | Площадки как отдельная сущность (`venues`) — source of truth для фронта. Наполнение: 2ГИС-источники (`direct_api`) пишут `date='always'`-карточки **напрямую в `venues`** (а не в `events`), enrich через `refresh-venues`, ручная пересборка `sync-venues`. Бекап в git через `export-venues` | `pipeline._run_direct_api_source`, `db.upsert_venues`, `cli.py`, таблица `venues`, `backup_venues.yml` |
@@ -1933,6 +1933,19 @@ Postgres TOAST (колонка `text`), TTL — 90–180 дней.
 отключить. Отвечает на вопрос «**стоит ли держать источник**» (в отличие от `source_health`, который
 отвечает «работает ли он»). Считается в `pipeline._source_quality` по `merge.merged_by_source`.
 
+**Видимость метрики (не только в БД):**
+- `_source_quality` возвращает `dict[str, dict]` (`{source: {found, unique, ratio}}`) — структура
+  расширяема (в будущем: `priority`, `new_unique`, `downgraded`). Результат складывается в
+  `PipelineResult.source_quality` **всегда** (в т.ч. при `--dry-run`), а в БД пишется только в боевом режиме.
+- `cli.py` печатает в конце прогона ASCII-таблицу по источникам, отсортированную по `ratio` ↑
+  (худшие сверху): `source · found · unique · бар · %` + строка `Avg ratio`. Префикс `generic:`
+  обрезается для читаемости. При `--dry-run` добавляется заметка, что `merged_by_source` неполный
+  (нет данных из БД).
+- structlog-событие `source_quality.summary` (`total_sources`, `avg_unique_ratio`) — для логов/дашборда.
+- **Warning при `ratio < 0.3` и `found >= 5`**: источник попадает в `PipelineResult.warnings` →
+  файл `parse_warnings_<city>.json` → Telegram-алерт (как протухший токен). Сигнал «источник сильно
+  дублирует другие, рассмотрите отключение». Порог `found >= 5` — чтобы не спамить на малых выборках.
+
 ### Таблица `coverage_stats` (Analytics) — покрытие по категориям
 
 Ежедневный снимок `(city, category, count, snapshot_date)`. Позволяет видеть тренды и замечать
@@ -2152,9 +2165,10 @@ Supabase Table Editor добавить вручную заведения, кот
   снят `continue-on-error` → 0 кандидатов за неделю тоже валит джобу + Telegram.
 
 **8. Дашборд source_quality** 📋  
-Сейчас `unique_events_ratio` записывается в `source_quality` молча. Нужно:
-- Вывести в конце прогона в stdout таблицу по источникам (ratio, found, unique)
-- Либо страницу `/admin/sources` на фронте (защищённая, только авторизованным)
+- ✅ **stdout-таблица** — в конце прогона `cli.py` печатает источники с `found/unique/ratio` + бар,
+  сортировка по `ratio` ↑, строка `Avg ratio`; источники с `ratio < 0.3` уходят в warnings →
+  Telegram (см. раздел «Таблица `source_quality`»). structlog-событие `source_quality.summary`.
+- 💡 Осталось: страница `/admin/sources` на фронте (защищённая, тренды по дням из `source_quality`).
 
 **9. Дедуп v2** 💡  
 Текущий дедуп по `id`(=city+slug из title+date) ловит точные совпадения и разброс в регистре/пунктуации.
