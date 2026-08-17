@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Header } from "@/components/Header";
-import { getEventBySlug, getEventsByCity } from "@/lib/events";
+import { getEventBySlug, getEventsByCity, getCityToday } from "@/lib/events";
 import { EVENT_TYPE_LABELS } from "@/lib/types";
 import type { EventItem } from "@/lib/types";
 import { eventBadgeStyle, eventPlaceholder } from "@/lib/event-styles";
@@ -30,7 +30,7 @@ function formatDate(event: EventItem): string {
 }
 
 export async function generateStaticParams() {
-  const events = await getEventsByCity("perm");
+  const events = await getEventsByCity("perm", getCityToday("perm"));
   return events.map((e) => ({ slug: e.slug }));
 }
 

@@ -4,60 +4,88 @@ import { useMemo, useState } from "react";
 import type { City, EventItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
 import { applyFilters, availableTypes, DEFAULT_FILTERS, type Filters } from "@/lib/filters";
-import { Sidebar } from "./Sidebar";
+import { groupByDay } from "@/lib/dayGroups";
+import { FilterBar } from "./FilterBar";
 import { EventCard } from "./EventCard";
 
 interface CityViewProps {
   events: EventItem[];
   cityTitle: string;
   city: City;
+  /** Календарная дата "сегодня" в таймзоне города — из getCityToday(city), см. page.tsx. */
+  today: string;
 }
 
-export function CityView({ events, cityTitle, city }: CityViewProps) {
+export function CityView({ events, cityTitle, city, today }: CityViewProps) {
   const types = useMemo(() => availableTypes(events), [events]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
-  const filtered = useMemo(
-    () => applyFilters(events, filters),
-    [events, filters],
+  // Сегодня/Завтра не зависят от вкладки "Когда" — фильтруем только по типу/цене.
+  const byTypeAndPrice = useMemo(
+    () => applyFilters(events, { ...filters, when: "any" }, today),
+    [events, filters, today],
+  );
+  const groups = useMemo(() => groupByDay(byTypeAndPrice, today), [byTypeAndPrice, today]);
+
+  // "Дальше" — то же самое множество, доп. отфильтрованное по вкладке "Когда".
+  const later = useMemo(
+    () => (filters.when === "any" ? groups.later : applyFilters(groups.later, filters, today)),
+    [groups.later, filters, today],
   );
 
+  const totalFound = groups.today.length + groups.tomorrow.length + later.length;
+
   return (
-    <div className="mx-auto max-w-[1440px] px-4 pt-6 pb-12 grid gap-6 lg:grid-cols-[240px_1fr] flex-1 w-full">
-      <Sidebar filters={filters} onChange={setFilters} availableTypes={types} />
+    <div className="mx-auto max-w-[1440px] px-4 pt-6 pb-12 flex flex-col gap-8 flex-1 w-full">
+      <div>
+        <h1 className="text-[28px] sm:text-[40px] font-extrabold leading-tight tracking-tight mb-2">
+          {cityTitle}
+        </h1>
+        <p className="text-sm text-muted mb-5">
+          Найдено: <strong className="text-ink">{totalFound}</strong> {pluralEvents(totalFound)}
+        </p>
+        <FilterBar filters={filters} onChange={setFilters} availableTypes={types} />
+      </div>
 
-      <main>
-        <div className="flex items-baseline justify-between gap-4 flex-wrap mb-5">
-          <h1 className="text-[22px] sm:text-[28px] font-bold leading-tight">
-            {cityTitle}
-          </h1>
-          <p className="text-sm text-muted">
-            Найдено:{" "}
-            <strong className="text-ink">{filtered.length}</strong>{" "}
-            {pluralEvents(filtered.length)}
-          </p>
-        </div>
+      {totalFound === 0 ? (
+        <EmptyState onReset={() => setFilters(DEFAULT_FILTERS)} />
+      ) : (
+        <>
+          <DaySection title="Сегодня" events={groups.today} />
+          <DaySection title="Завтра" events={groups.tomorrow} />
+          <DaySection title="Дальше" events={later} />
+        </>
+      )}
 
-        {filtered.length === 0 ? (
-          <EmptyState onReset={() => setFilters(DEFAULT_FILTERS)} />
-        ) : (
-          <div className="grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((event) => (
-              <EventCard key={event.id} event={event} />
-            ))}
-          </div>
-        )}
-
-        <section className="mt-12 pt-8 border-t border-border">
-          <h2 className="text-lg font-semibold mb-2 text-ink">
-            Досуг в {CITY_CONFIG[city].label} — всё в одном месте
-          </h2>
-          <p className="text-sm text-muted leading-relaxed max-w-3xl">
-            {CITY_CONFIG[city].description}
-          </p>
-        </section>
-      </main>
+      <section className="pt-8 border-t border-border">
+        <h2 className="text-lg font-semibold mb-2 text-ink">
+          Досуг в {CITY_CONFIG[city].label} — всё в одном месте
+        </h2>
+        <p className="text-sm text-muted leading-relaxed max-w-3xl">
+          {CITY_CONFIG[city].description}
+        </p>
+      </section>
     </div>
+  );
+}
+
+function DaySection({ title, events }: { title: string; events: EventItem[] }) {
+  if (events.length === 0) return null;
+
+  return (
+    <section>
+      <div className="flex items-baseline gap-3 mb-[18px]">
+        <h2 className="text-[19px] font-extrabold m-0">{title}</h2>
+        <span className="ml-auto text-[11.5px] font-bold px-2.5 py-[3px] rounded-full text-accent-cyan bg-[color:var(--color-accent-cyan)]/[0.12] border border-[color:var(--color-accent-cyan)]/30">
+          {events.length} {pluralEvents(events.length)}
+        </span>
+      </div>
+      <div className="grid gap-5 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+        {events.map((event) => (
+          <EventCard key={event.id} event={event} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -72,7 +100,7 @@ function EmptyState({ onReset }: { onReset: () => void }) {
       <button
         type="button"
         onClick={onReset}
-        className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
+        className="px-4 py-2 bg-accent text-bg rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
       >
         Сбросить фильтры
       </button>

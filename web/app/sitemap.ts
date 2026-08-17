@@ -1,13 +1,13 @@
 import type { MetadataRoute } from "next";
-import { getEventsByCity } from "@/lib/events";
+import { getEventsByCity, getCityToday } from "@/lib/events";
 import { getVenuesByCity } from "@/lib/venues";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://afisha-site.ru";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [permEvents, sochiEvents, permVenues, sochiVenues] = await Promise.all([
-    getEventsByCity("perm"),
-    getEventsByCity("sochi"),
+    getEventsByCity("perm", getCityToday("perm")),
+    getEventsByCity("sochi", getCityToday("sochi")),
     getVenuesByCity("perm"),
     getVenuesByCity("sochi"),
   ]);
