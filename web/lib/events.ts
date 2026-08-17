@@ -74,16 +74,19 @@ const CITY_TIMEZONES: Record<City, string> = {
   sochi: "Europe/Moscow", // UTC+3
 };
 
-export async function getEventsByCity(city: City): Promise<EventItem[]> {
+/** «Сегодня» в таймзоне города — единственное место в кодовой базе, где текущий момент превращается в календарную дату. */
+export function getCityToday(city: City): string {
   const timezone = CITY_TIMEZONES[city] ?? "Europe/Moscow";
   // en-CA даёт YYYY-MM-DD; timeZone делает дату местной (билд идёт в 21:00 UTC).
-  const today = new Intl.DateTimeFormat("en-CA", {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
 
+export async function getEventsByCity(city: City, today: string): Promise<EventItem[]> {
   // .neq('always') обязателен: в строковом сравнении Postgres 'always' >= 'YYYY-MM-DD' = TRUE,
   // т.е. .gte сам по себе always-строки НЕ отсекает. Площадки живут в таблице venues, не в сетке.
   const { data, error } = await supabase

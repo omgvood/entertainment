@@ -5,6 +5,7 @@
  */
 
 import type { EventItem, EventType } from "./types";
+import { addDaysUTC } from "./dateUtil";
 
 export type WhenFilter = "today" | "tomorrow" | "weekend" | "any";
 
@@ -55,35 +56,25 @@ export const DEFAULT_FILTERS: Filters = {
   priceMax: 5000,
 };
 
-function toYMD(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /**
  * Возвращает Set дат «этих выходных» (ближайших Сб и Вс, включая сегодня если оно Сб/Вс).
  * Окно — 7 дней вперёд начиная с today, чтобы поймать ближайшие Сб и Вс.
+ * dayOfWeekUTC берём из того же UTC-парсинга, что и addDaysUTC — иначе день недели
+ * может съехать на границе суток при отличии локальной TZ от UTC.
  */
-function getWeekendDates(today: Date): Set<string> {
+function getWeekendDates(today: string): Set<string> {
   const result = new Set<string>();
   for (let i = 0; i < 7; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    const dow = d.getDay();
-    if (dow === 6 || dow === 0) result.add(toYMD(d));
+    const ymd = addDaysUTC(today, i);
+    const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+    if (dow === 6 || dow === 0) result.add(ymd);
   }
   return result;
 }
 
-export function applyFilters(events: EventItem[], filters: Filters): EventItem[] {
-  const now = new Date();
-  const today = toYMD(now);
-  const tomorrowDate = new Date(now);
-  tomorrowDate.setDate(now.getDate() + 1);
-  const tomorrow = toYMD(tomorrowDate);
-  const weekend = filters.when === "weekend" ? getWeekendDates(now) : null;
+export function applyFilters(events: EventItem[], filters: Filters, today: string): EventItem[] {
+  const tomorrow = addDaysUTC(today, 1);
+  const weekend = filters.when === "weekend" ? getWeekendDates(today) : null;
 
   return events.filter((event) => {
     // 1. Тип
