@@ -66,7 +66,7 @@ export function VenueDetail({ venue, city }: { venue: VenueItem; city: City }) {
         </div>
 
         <span
-          className={`inline-block text-[11px] font-semibold px-2 py-[3px] rounded-full uppercase tracking-wider mb-3 ${venueBadgeStyle(venue.type)}`}
+          className={`inline-block text-[10.5px] font-bold px-[10px] py-1 rounded-full uppercase tracking-wider border mb-3 ${venueBadgeStyle(venue.type)}`}
         >
           {typeLabel}
         </span>
@@ -94,7 +94,7 @@ export function VenueDetail({ venue, city }: { venue: VenueItem; city: City }) {
           href={mapUrl(venue)}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 px-5 py-3 bg-accent text-white rounded-lg font-medium hover:bg-accent-hover transition-colors"
+          className="inline-flex items-center gap-2 px-[22px] py-[11px] bg-accent text-bg rounded-[10px] font-bold text-[13.5px] hover:bg-accent-hover transition-colors"
         >
           Показать на карте →
         </a>

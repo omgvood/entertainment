@@ -2,22 +2,24 @@
  * Стили карточек/страниц площадок по типу.
  * В отличие от EventType (закрытый enum), тип площадки — string из БД,
  * поэтому ключи мягкие, а getVenueStyle() гарантирует fallback.
+ * Цвета — та же неоновая палитра, что в web/lib/event-styles.ts (bowling/billiards/karting/quest
+ * используют те же hue, что и одноимённые EventType, для визуальной согласованности).
  */
 
 const BADGE_STYLES: Record<string, string> = {
-  bowling: "bg-[#e7f5ff] text-[#1971c2]",
-  billiards: "bg-[#e7f9ec] text-[#2b8a3e]",
-  karting: "bg-[#fff4e0] text-[#d97706]",
-  quest: "bg-[#e7fbf5] text-[#0d9488]",
-  other: "bg-[#eef0f3] text-[#475569]",
+  bowling: "text-[#35e0c8] border-[#35e0c84d] bg-bg",
+  billiards: "text-[#35e0c8] border-[#35e0c84d] bg-bg",
+  karting: "text-[#ffb37a] border-[#ff9d4d66] bg-bg",
+  quest: "text-[#35e0c8] border-[#35e0c84d] bg-bg",
+  other: "text-[#a89dc4] border-[#4a3d6b] bg-bg",
 };
 
 const PLACEHOLDER_STYLES: Record<string, { gradient: string; emoji: string }> = {
-  bowling: { gradient: "from-[#e7f5ff] to-[#a5d8ff]", emoji: "🎳" },
-  billiards: { gradient: "from-[#e7f9ec] to-[#b2f2bb]", emoji: "🎱" },
-  karting: { gradient: "from-[#fff4e0] to-[#ffd8a8]", emoji: "🏎️" },
-  quest: { gradient: "from-[#e7fbf5] to-[#99f6e4]", emoji: "🗝️" },
-  other: { gradient: "from-[#eef0f3] to-[#cbd5e1]", emoji: "✨" },
+  bowling: { gradient: "from-[#0f4a3f] to-[#1b0f2e]", emoji: "🎳" },
+  billiards: { gradient: "from-[#0f4a3f] to-[#1b0f2e]", emoji: "🎱" },
+  karting: { gradient: "from-[#5a2e0c] to-[#1b0f2e]", emoji: "🏎️" },
+  quest: { gradient: "from-[#0f4a3f] to-[#1b0f2e]", emoji: "🗝️" },
+  other: { gradient: "from-[#2b2440] to-[#1b0f2e]", emoji: "✨" },
 };
 
 export function venueBadgeStyle(type: string): string {

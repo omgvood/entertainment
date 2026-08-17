@@ -10,7 +10,7 @@ export function VenueCard({ venue }: { venue: VenueItem }) {
   return (
     <Link
       href={`/${venue.city}/venues/${venue.slug}/`}
-      className="group bg-surface border border-border rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 flex flex-col"
+      className="group bg-surface border border-border rounded-2xl overflow-hidden hover:shadow-[0_22px_44px_-22px_rgba(255,61,127,0.35)] hover:-translate-y-0.5 transition-all duration-150 flex flex-col"
     >
       <div className="relative aspect-[4/3] bg-[#ddd]">
         {isUsableImage(venue.imageUrl) ? (
@@ -34,7 +34,7 @@ export function VenueCard({ venue }: { venue: VenueItem }) {
 
       <div className="p-3 pb-4 flex flex-col gap-2 flex-1">
         <span
-          className={`inline-block self-start text-[11px] font-semibold px-2 py-[3px] rounded-full uppercase tracking-wider ${venueBadgeStyle(venue.type)}`}
+          className={`inline-block self-start text-[10.5px] font-bold px-[10px] py-1 rounded-full uppercase tracking-wider border ${venueBadgeStyle(venue.type)}`}
         >
           {getVenueTypeLabel(venue.type)}
         </span>
