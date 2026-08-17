@@ -145,6 +145,30 @@ cities:
         event_type: karting
         priority: 70
 
+      # 2ГИС — спортивные места «всегда» (скалодром/батут/теннис). Тот же провайдер twogis,
+      # что и bowling/billiards/karting: текстовый поиск по Catalog API → venues (date='always').
+      # event_type=sport (нет отдельных типов в EventType). Проверять по parse_warnings/coverage.
+      - name: twogis-skalodrom
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "скалодром Пермь"
+        event_type: sport
+        priority: 70
+
+      - name: twogis-batut
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "батутный центр Пермь"
+        event_type: sport
+        priority: 70
+
+      - name: twogis-tenis
+        extraction_mode: direct_api
+        provider: twogis
+        api_query: "теннисный клуб Пермь"
+        event_type: sport
+        priority: 70
+
       # Timepad — широкая афиша: тип события определяется по его категории Timepad
       - name: timepad
         extraction_mode: direct_api
@@ -178,7 +202,13 @@ cities:
           # Организаторы — детские события
           - dollpermmuseum     # Пермский театр кукол
           # Организаторы — мастер-классы / арт
-          - artspaceperm       # арт-пространства Перми 
+          - artspaceperm       # арт-пространства Перми
+          # Спортклубы — анонсы матчей (сайты клубов — SPA, стены ВК ведутся регулярно).
+          # Публичные группы, wall.get сервисным ключом должен работать — проверить в первом
+          # прогоне (parse_warnings). Если стена только новости без дат — убрать (шум/квота).
+          - volleykama        # ВК «Кама-Волей» (волейбол)
+          - hc.molot          # ХК «Молот» (хоккей)
+          - parmabasket       # БК «Парма» (баскетбол)
 
       # Telegram — посты публичных каналов (веб-превью t.me/s/, без авторизации).
       # source_type влияет на строгость префильтра: organizer (мало шума) — мягче,
@@ -248,6 +278,51 @@ cities:
         address: "Пермь, бул. Гагарина, 24"
         priority: 55
         full_snapshot: true
+
+      # ── КАНДИДАТЫ ИЗ seeds_editor-dobavleny_tochki_2gis.xlsx (СТАДИЯ РЕСЁРЧА) ──────────
+      # Проверено httpx 2026-07-03: все нижеперечисленные сайты — JS-рендер (SPA), их
+      # расписание НЕ попадает в статический HTML (0 дат в видимом тексте / данные спрятаны
+      # в __NUXT__/__NEXT_DATA__). Значит batch_listing им не подходит — нужен
+      # playwright_listing (в CI Playwright есть) ЛИБО отдельный direct_api-клиент к их
+      # приватному API (эндпоинт /api/site/1.0/* — точный путь ищется через DevTools→Network).
+      # Оставлены закомментированными: включать по одному ПОСЛЕ проверки, что рендер даёт
+      # 3-5 реальных будущих событий (--dry-run). priority: клубы 90 (первоисточник матчей),
+      # квизы 50 (ниже quizplease/60). full_snapshot ставить ТОЛЬКО при отсутствии пагинации.
+      #
+      # Спортклубы (Группа C):
+      #   amkar-perm.ru — React SPA, «Ближайшие матчи» рендерится JS (видимый текст ~760 симв.)
+      #   hc-molot.ru   — календарь-виджет, матчи подгружаются JS; сейчас межсезонье (июль)
+      # - name: amkar-perm
+      #   extraction_mode: playwright_listing
+      #   url: https://amkar-perm.ru/matches/calendar
+      #   event_type: sport
+      #   priority: 90
+      # - name: hc-molot
+      #   extraction_mode: playwright_listing
+      #   url: https://hc-molot.ru/?p=calendar
+      #   event_type: sport
+      #   priority: 90
+      #
+      # Квизы (Группа D):
+      #   rudagames.com — Nuxt SPA (данные в __NUXT__), есть приватный /api/site/1.0/*
+      #   perm.smuzi-quiz.com/games — Tilda, карточки игр подгружаются JS (0 дат в статике)
+      #   perm.shakerquiz.ru — Next.js (данные в __NEXT_DATA__), есть приватный /api/site/1.0/*
+      #   perm.wowquiz.ru — НЕ ДОБАВЛЯТЬ: пустой Nuxt-скелет (10КБ, 0 игр) — сайт мёртв/пуст
+      # - name: rudagames-perm
+      #   extraction_mode: playwright_listing
+      #   url: https://rudagames.com/perm/schedule
+      #   event_type: quiz
+      #   priority: 50
+      # - name: smuzi-quiz-perm
+      #   extraction_mode: playwright_listing
+      #   url: https://perm.smuzi-quiz.com/games
+      #   event_type: quiz
+      #   priority: 50
+      # - name: shaker-quiz-perm
+      #   extraction_mode: playwright_listing
+      #   url: https://perm.shakerquiz.ru/
+      #   event_type: quiz
+      #   priority: 50
 
       # DeepSeek тестовый источник (раскомментировать для локального тестирования)
       # - name: quizplease-deepseek-test
