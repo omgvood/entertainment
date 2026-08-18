@@ -1,15 +1,8 @@
-import Image from "next/image";
 import Link from "next/link";
 import type { EventItem } from "@/lib/types";
 import { EVENT_TYPE_LABELS } from "@/lib/types";
 import { eventBadgeStyle, eventPlaceholder } from "@/lib/event-styles";
-
-function isUsableImage(url?: string): boolean {
-  if (!url) return false;
-  // svg-иконки (rating/difficulty/markers) — не годятся как карточка 400×300
-  if (url.toLowerCase().endsWith(".svg")) return false;
-  return true;
-}
+import { CardImage } from "./CardImage";
 
 const MONTHS_RU = [
   "января",
@@ -42,23 +35,11 @@ export function EventCard({ event }: { event: EventItem }) {
       className="group bg-surface border border-border rounded-2xl overflow-hidden hover:border-[color:var(--color-border-hi,#4a3d6b)] hover:shadow-[0_22px_44px_-22px_rgba(255,61,127,0.35)] hover:-translate-y-0.5 transition-all duration-150 flex flex-col"
     >
       <div className="relative aspect-video bg-bg">
-        {isUsableImage(event.imageUrl) ? (
-          <Image
-            src={event.imageUrl!}
-            alt={`${event.title} — ${EVENT_TYPE_LABELS[event.type]} в ${event.venueName}`}
-            fill
-            sizes="(min-width: 1200px) 25vw, (min-width: 768px) 33vw, 50vw"
-            className="object-cover"
-            unoptimized
-          />
-        ) : (
-          <div
-            className={`absolute inset-0 bg-gradient-to-br ${placeholder.gradient} flex items-center justify-center text-6xl`}
-            aria-hidden
-          >
-            {placeholder.emoji}
-          </div>
-        )}
+        <CardImage
+          imageUrl={event.imageUrl}
+          alt={`${event.title} — ${EVENT_TYPE_LABELS[event.type]} в ${event.venueName}`}
+          placeholder={placeholder}
+        />
       </div>
 
       <div className="p-4 pb-[18px] flex flex-col gap-[9px] flex-1">
