@@ -129,6 +129,7 @@ Vercel CDN ← пользователь
 | **Fast-fail на суточной квоте** | При исчерпании дневной квоты Gemini free-tier (20 запросов/сутки на модель, `RESOURCE_EXHAUSTED` + `GenerateRequestsPerDayPerProjectPerModel`) `with_retry` раньше делал 3 бесполезных ретрая с backoff — квота до конца суток не восстановится. Теперь такой лимит отличается от временной перегрузки (503/TPM) и пробрасывается сразу → `FallbackExtractor` без задержки переключается на следующего провайдера | `extraction/_errors.is_daily_quota_exhausted`, `extraction/retry.with_retry` |
 | **Неоновый редизайн фронта** | Тёмная неоновая тема: токены в `globals.css`, единые стили бейджей/плейсхолдеров событий. Главная перестроена с «сетка + сайдбар» на **hero + горизонтальный `FilterBar` + секции «Сегодня / Завтра / Дальше»** (`Sidebar.tsx` удалён). Карточка показывает площадку, описание и теги; битая картинка источника падает на emoji-заглушку | `web/app/globals.css`, `lib/event-styles.ts`, `components/CityView.tsx`, `components/FilterBar.tsx`, `components/CardImage.tsx` |
 | **Таймзона города на фронте** | «Сегодня» считается в таймзоне города (`getCityToday`), а не в UTC сервера сборки — билд идёт в 21:00 UTC, из-за чего дата уезжала на сутки. Дальше эта строка передаётся вниз пропом, а вся арифметика дат идёт над строками `YYYY-MM-DD` через UTC-компоненты — группировка по дням и фильтр «Когда» не зависят от таймзоны браузера | `lib/events.getCityToday`, `lib/dateUtil.ts`, `lib/dayGroups.ts` |
+| **Fuzzy-дедуп (Dedup v2)** | Write-time guard: событие, уже записанное под другой формулировкой названия («Квиз в баре» / «Квиз-вечер в баре»), не получает вторую карточку. Скорер `max(посимвольное, вложенность токенов, Jaccard)` × множитель за площадку, жёсткий guard по `time_start`, кластеризация union-find (транзитивность: A~B~C при A≁C — один кластер). Порог `≥0.95` — автослияние, `0.75–0.95` — запись в `dedup_candidates` без слияния (материал для калибровки и `dedup-backfill`) | `fuzzy.py`, `merge.fuzzy_merge`, таблица `dedup_candidates`, команда `dedup-backfill` |
 
 Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
 
@@ -150,8 +151,9 @@ entertainment/
 │   │   ├── http_utils.py           — fetch_with_retry (3 попытки, exponential backoff)
 │   │   ├── url_utils.py            — resolve_event_url: event_url → source_url + JUNK_DOMAINS
 │   │   ├── pipeline.py             — оркестратор пайплайна + health/coverage/quality/merge
-│   │   ├── merge.py                — кросс-источниковое слияние дублей по id (priority)
-│   │   ├── db.py                   — upsert + cleanup + raw_documents/health/coverage
+│   │   ├── merge.py                — кросс-источниковое слияние дублей по id (priority) + fuzzy_merge
+│   │   ├── fuzzy.py                 — fuzzy-скорер названий + кластеризация (Dedup v2, слой 2)
+│   │   ├── db.py                   — upsert + cleanup + raw_documents/health/coverage/dedup_candidates
 │   │   ├── dedup.py                — фильтрация известных URL (per_url)
 │   │   ├── validator.py            — конвертация в EventRow + slug + fingerprint
 │   │   ├── discovery/
@@ -194,10 +196,11 @@ entertainment/
 │   │   ├── test_discovery.py       — ListingDiscovery, SitemapDiscovery
 │   │   ├── test_extractors.py      — DeepSeekExtractor (mock LLM) + is_rate_limit
 │   │   ├── test_fallback.py        — FallbackExtractor (фолбэк/проброс/исчерпание) + with_retry (в т.ч. суточная квота без ретрая)
+│   │   ├── test_fuzzy.py           — fuzzy-скорер и кластеризация (реальные пары дублей из прода)
 │   │   ├── test_generic.py         — generic-парсер (load_approved_domains, resolve_listing_url)
 │   │   ├── test_jsonld.py          — extract_jsonld_events (Schema.org JSON-LD)
 │   │   ├── test_kudago.py          — KudaGoClient (маппинг категорий)
-│   │   ├── test_merge.py           — merge_rows (priority, enrichment, near_misses)
+│   │   ├── test_merge.py           — merge_rows (priority, enrichment, near_misses) + fuzzy_merge
 │   │   ├── test_candidate_sources.py — поисковые провайдеры, circuit breaker, суффиксный фильтр доменов, авто-апрув
 │   │   ├── test_permm.py           — ПЕРММ: маппинг /json/* → ParsedEvent (фикстуры, без сети)
 │   │   ├── test_permopera.py       — Театр оперы: разбор HTML-в-JSON афиши (фикстура)
@@ -296,6 +299,7 @@ entertainment/
 | `discover` | Только discovery без LLM и записи в БД. Используется для отладки краулеров |
 | `discover-sources` | Discovery новых источников: поиск → скоринг → `candidate_sources` (раз в неделю). Exit 1, если все keyed-провайдеры (Serper/Brave) отключились по авторизации |
 | `run` | Полный пайплайн: discovery → dedup → LLM-извлечение → валидация → запись в БД. При предупреждениях источников пишет `parse_warnings_<city>.json` для GHA-алерта |
+| `dedup-backfill --city <slug> [--threshold] [--apply]` | Разбор уже накопленных fuzzy-дублей (см. «`fuzzy.py` + `merge.fuzzy_merge`»). Safe-by-default: без `--apply` только печать кластеров |
 
 **Флаги:**
 
@@ -483,13 +487,14 @@ LLM-экстракторы получают список разрешённых 
 1. Перебирает источники из `CityConfig`, замеряя длительность каждого
 2. Для каждого вызывает нужный runner (`_run_per_url_source`, `_run_batch_source`, `_run_direct_api_source`, `_run_vk_events_source`, `_run_vk_posts_source`, `_run_telegram_posts_source`, `_run_generic_source`)
 3. Пишет здоровье источника в `source_health` (`record_source_health`); если у источника были предупреждения (см. ниже) — первое уходит в `last_error`, иначе `NULL` (источник «выздоровел»)
-4. **Cross-source merge** (`merge.merge_rows`): группирует строки по `id` (= city+slug), выбирает победителя по `priority`, обогащает его пустые поля из проигравших; в боевом режиме подмешивает существующие строки из БД (`fetch_events_by_ids`), чтобы не даунгрейдить карточку источником с меньшим приоритетом
+4. **Слой 1 — exact-merge** (`merge.merge_rows`): группирует строки по `id` (= city+slug), выбирает победителя по `priority`, обогащает его пустые поля из проигравших. Пул из БД (`fetch_events_for_dedup`, по датам прогона) тянется один раз и используется и слоем 1 (только пересечение по `id`, иначе каждый прогон переписывал бы весь город), и слоем 2 (нужны и строки с ДРУГИМИ id)
+4b. **Слой 2 — fuzzy-merge** (`merge.fuzzy_merge`, см. раздел «`fuzzy.py` + `merge.fuzzy_merge`»): событие, уже записанное под другой формулировкой названия, не получает вторую карточку (write-time guard, без удалений)
 5. После каждого источника (до merge): если `source.full_snapshot` и извлечено > 0 событий — вызывает `sync_source_events`, удаляя будущие события данного источника, которых нет в текущем прогоне (отменены на сайте)
 6. Upsert в БД (слияние делит `id` → upsert по slug перезаписывает на месте, удалений не нужно)
-7. Очистка: `cleanup_old_events` (TTL 1 день) + `cleanup_old_raw_documents` (TTL) + снимки `record_coverage` и `record_source_quality` (доля уникальных событий по источникам через `_source_quality`)
-7. Возвращает `PipelineResult` (discovered / new / extracted / failed / written / **merged** / **near_misses** / **merged_by_source** / **warnings**)
+7. Очистка: `cleanup_old_events` (TTL 1 день) + `cleanup_old_raw_documents` (TTL) + `cleanup_old_dedup_candidates` (TTL) + снимки `record_coverage`, `record_source_quality` (доля уникальных событий по источникам через `_source_quality`) и `record_dedup_candidates` (аудит fuzzy-слоя)
+8. Возвращает `PipelineResult` (discovered / new / extracted / failed / written / **merged** / **near_misses** / **merged_by_source** / **fuzzy_merged** / **fuzzy_merged_in_source** / **fuzzy_candidates** / **warnings**)
 
-> **`merged_by_source`** (разбивка «источник-проигравший → победитель») — KPI для оценки реальной ценности нового источника: видно, сколько событий VK уникальны, а сколько дублируют Timepad. **`near_misses`** (та же площадка+дата, разные названия) — сигнал-кандидат для будущего fuzzy-матчинга, пока только логируется.
+> **`merged_by_source`** (разбивка «источник-проигравший → победитель») — KPI для оценки реальной ценности нового источника: видно, сколько событий VK уникальны, а сколько дублируют Timepad. **`near_misses`** (та же площадка+дата, разные названия) — сырой сигнал, сравнивается с fuzzy-метрикой, сам по себе на запись не влияет. **`fuzzy_merged`**/**`fuzzy_merged_in_source`** — сколько карточек не создано слоем 2 (и сколько из них — дубли внутри одного источника, не портящие `unique_events_ratio`). **`fuzzy_candidates`** — пар в серой зоне (0.75–0.95), записанных в `dedup_candidates` без слияния. Кластер `> 3` карточек уходит в `warnings` — сигнал, что порог фузи-дедупа мог поехать.
 
 > **`warnings`** — список критичных, но не фатальных проблем прогона (напр. `timepad-perm: HTTP 403 — проверь токен/ключ API`). Каждый источник копит их в своём локальном `sub` и пробрасывает в общий результат — `run_city` их агрегирует, не «заражая» соседей. `cli.py` пишет непустой список в `parse_warnings_<city>.json`, откуда GHA шлёт Telegram-алерт (см. `parse.yml`). Строки обрезаны до 200 символов (лимит `varchar` в БД и Telegram).
 
@@ -657,9 +662,60 @@ LLM-экстракторы получают список разрешённых 
 - **Обогащение** — пустые поля победителя (`time_start`, `image_url`, `description`, `organizer`, `district`, цена, теги) добираются из проигравших. Итог — карточка лучше любого отдельного источника.
 - **Без удалений** — все слитые строки делят `id`, upsert по `slug` перезаписывает на месте.
 - **Чистые функции** — без обращения к БД, тестируются изолированно (`tests/test_merge.py`).
-- **Fuzzy-матчинг отложен** — нормализация уже ловит регистр/пунктуацию/ё; разные названия одного события (`near_misses`) пока только считаются, не схлопываются.
 
 Приоритеты в `seeds.yaml`: `timepad` 100, `vk-events` 80, `twogis-*` 70, `quizplease` 60, `telegram-posts` 45, `vk-posts` 40, `generic` 20.
+
+---
+
+### `fuzzy.py` + `merge.fuzzy_merge` — Dedup v2 (слой 2)
+
+`merge_rows` ловит только точные совпадения `id`. Разные формулировки одного анонса
+(«Квиз в баре» / «Квиз-вечер в баре») дают разные `slug` → разные `id` → две карточки.
+Слой 2 закрывает этот случай — деталь и обоснование решений в
+[спеке](docs/superpowers/specs/2026-08-18-fuzzy-dedup-design.md).
+
+**Скорер (`fuzzy.py`, чистые функции без БД/сети):**
+- `text_score(a, b)` — `max(посимвольное сходство, вложенность токенов, Jaccard)`. Каждая
+  метрика ловит свой тип дубля: посимвольное — «аудио спектакль» vs «аудиоспектакль»,
+  вложенность — «Акция X» ⊂ «АКЦИЯ X: ПОДРОБНОСТИ», Jaccard — перестановки слов.
+  Вложенность не засчитывается для короткого названия (`Йога` не должно схлопнуться с
+  `Йога на набережной`) — включается только при ≥2 значимых токенах и ≥12 символах.
+- `score_pair(a, b) -> PairScore` — `title_score × venue_factor`. Жёсткий guard: если у
+  обеих строк задан `time_start` и он разный — `score = 0` (разные сеансы, не переформулировка).
+  Площадка не помогает совпадению, только может навредить (штраф при явном несовпадении,
+  нейтрально при пустой). Без единого подтверждающего сигнала (ни площадки, ни времени) —
+  штраф `×0.9`.
+- `cluster_events(rows, merge_threshold, report_threshold)` — блокировка по `city+date`
+  (`always` не участвует — площадки живут в `venues`), рёбра при `score >= merge_threshold`,
+  кластеры — компоненты связности через union-find (нужна транзитивность: «День рождения
+  парка Горького» приходит четырьмя формулировками, попарного слияния мало).
+
+**Пороги:** `config.DEDUP_MERGE_SCORE = 0.95` (автослияние), `config.DEDUP_CANDIDATE_SCORE = 0.75`
+(серая зона — запись в `dedup_candidates` без слияния).
+
+**`merge.fuzzy_merge(rows, existing, priorities) -> FuzzyResult`** — write-time guard поверх
+кластеров: ежедневный пайплайн умеет только НЕ создавать новый `id`, удалений нет.
+- Кластер из новых строк + уже записанной — победитель обязан быть среди записанных
+  (`resolve_cluster(..., prefer=persisted)`): id/slug в БД не меняются, иначе URL уедет
+  и карточка выпадет из индекса/sitemap.
+- Кластер из одних новых строк — победитель по `priority` (как в `merge_rows`).
+- Кластер из одних уже записанных строк — не трогаем (выбросить из upsert ≠ удалить, только
+  испортит свежесть данных); пара уходит в `dedup_candidates` — это работа для `dedup-backfill`.
+- `FuzzyResult.largest_cluster > 3` уходит в `PipelineResult.warnings` → Telegram-алерт:
+  сигнал, что порог поехал и клеит лишнее (или в городе правда большой многочастный ивент).
+
+**Известный предел:** кластер «День рождения парка Горького» ×4 (общих основ 2 из 6 → score
+~0.33) правила не поймают — это осознанная цена отказа от LLM-арбитра. Всплывает только в
+`dedup-backfill` с пониженным порогом (`--threshold`), под ручным просмотром.
+
+**Таблица `dedup_candidates`** — аудит автослияний + материал для калибровки порогов серой
+зоны. Пишется всегда (в т.ч. что схлопнули), TTL как у событий (`cleanup_old_dedup_candidates`).
+
+**Команда `dedup-backfill --city <slug> [--threshold] [--apply]`** — разбор УЖЕ накопленных
+дублей (тех, что появились до включения слоя 2). Safe-by-default: без `--apply` только печатает
+кластеры «оставить / удалить»; победитель выбирается той же `resolve_cluster`, что и в пайплайне
+(единое правило на оба пути). Удаление карточки — решение человека (риск 404 на уже
+проиндексированном URL), поэтому шаг разовый и осознанный.
 
 ---
 
@@ -2000,6 +2056,22 @@ Postgres TOAST (колонка `text`), TTL — 90–180 дней.
   файл `parse_warnings_<city>.json` → Telegram-алерт (как протухший токен). Сигнал «источник сильно
   дублирует другие, рассмотрите отключение». Порог `found >= 5` — чтобы не спамить на малых выборках.
 
+### Таблица `dedup_candidates` (Analytics) — кандидаты fuzzy-дедупа
+
+Пары похожих событий, найденные слоем 2 (`fuzzy.py`, см. раздел «`fuzzy.py` + `merge.fuzzy_merge`»).
+Пишется на каждом боевом прогоне: и то, что автослилось (`decision='auto_merge'`, аудит), и серая
+зона (`decision='candidate'`, материал для калибровки порогов и для `dedup-backfill`).
+
+| Поле | Тип | Описание |
+|------|-----|---------|
+| `event_id_a` / `event_id_b` | text | Пара `id`; `a` всегда лексикографически меньше `b` (иначе `UNIQUE(a,b)` пропустит зеркальный дубль) |
+| `title_a` / `title_b`, `source_a` / `source_b`, `venue_a` / `venue_b`, `time_a` / `time_b` | text | Снимок полей пары на момент сравнения (для чтения без джойна в `events`) |
+| `score` / `title_score` / `venue_score` | numeric(4,3) | Итог и разбивка по сигналам скорера |
+| `reason` | text | `ok` / `time_mismatch` (жёсткий guard) / `no_supporting_signals` (штраф `×0.9`) |
+| `decision` | text | `auto_merge` (схлопнули) / `candidate` (оставили врозь, серая зона) |
+| `resolution` / `resolved_at` / `resolved_by` | text / timestamptz / text | Зарезервированы под будущего разрешателя серой зоны (LLM или человек) — сейчас всегда `NULL` |
+| `first_seen_at` / `last_seen_at` | timestamptz | Первая и последняя встреча пары (TTL по `event_date`, как у событий) |
+
 ### Таблица `coverage_stats` (Analytics) — покрытие по категориям
 
 Ежедневный снимок `(city, category, count, snapshot_date)`. Позволяет видеть тренды и замечать
@@ -2224,11 +2296,14 @@ Supabase Table Editor добавить вручную заведения, кот
   Telegram (см. раздел «Таблица `source_quality`»). structlog-событие `source_quality.summary`.
 - 💡 Осталось: страница `/admin/sources` на фронте (защищённая, тренды по дням из `source_quality`).
 
-**9. Дедуп v2** 💡  
-Текущий дедуп по `id`(=city+slug из title+date) ловит точные совпадения и разброс в регистре/пунктуации.
-Не ловит «Квиз» vs «Квиз-вечер» (разные title → разные slug). Идея:
+**9. Дедуп v2** ✅ (fuzzy-слой; частично)  
+Слой 1 (`id`=city+slug из title+date) ловил только точные совпадения и разброс в регистре/пунктуации.
+Слой 2 (`fuzzy.py` + `merge.fuzzy_merge`, см. раздел выше) закрыл «Квиз» vs «Квиз-вечер» — write-time
+guard по кластерам сходства названий, порог 0.95, серая зона в `dedup_candidates`, разбор накопленного
+через `dedup-backfill`. Осталось нереализованным:
+- LLM-арбитр серой зоны (0.75–0.95) — уже записанные события им не починить без `merged_into`/удаления,
+  то есть без правок фронта; таблица `dedup_candidates` копит материал на будущее
 - Per-field priority (VK-пост знает об отмене раньше, чем Timepad)
-- Fuzzy-матчинг по `near_misses` (уже накапливается в `pipeline.py`, не используется)
 - Freshness weighting: свежий источник о переносе важнее старого о мероприятии
 
 **10. Telegram через MTProto** 💡  
