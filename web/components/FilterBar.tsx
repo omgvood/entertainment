@@ -20,6 +20,7 @@ const WHEN_OPTIONS: { value: WhenFilter; label: string }[] = [
 
 export function FilterBar({ filters, onChange, availableTypes }: FilterBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const [moreTypesOpen, setMoreTypesOpen] = useState(false);
 
   const toggleType = (t: EventType) => {
     const next = new Set(filters.types);
@@ -32,6 +33,16 @@ export function FilterBar({ filters, onChange, availableTypes }: FilterBarProps)
 
   const setPrice = (priceMin: number, priceMax: number) =>
     onChange({ ...filters, priceMin, priceMax });
+
+  const visibleTypes = availableTypes.slice(0, 4);
+  const overflowTypes = availableTypes.slice(4);
+
+  const typeChipClass = (active: boolean) =>
+    `text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border whitespace-nowrap transition-colors ${
+      active
+        ? "bg-accent border-transparent text-bg"
+        : "bg-bg border-border text-muted hover:border-[color:var(--color-border)]"
+    }`;
 
   return (
     <div className="relative flex items-center gap-[14px] p-3 bg-surface border border-border rounded-2xl overflow-x-auto">
@@ -46,24 +57,51 @@ export function FilterBar({ filters, onChange, availableTypes }: FilterBarProps)
 
       <div className="w-px self-stretch bg-border flex-shrink-0" />
 
-      <div className="flex gap-2 flex-none">
-        {availableTypes.map((t) => {
+      <div className="flex gap-2 flex-none relative">
+        {visibleTypes.map((t) => {
           const active = filters.types.has(t);
           return (
             <button
               key={t}
               type="button"
               onClick={() => toggleType(t)}
-              className={`text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border whitespace-nowrap transition-colors ${
-                active
-                  ? "bg-accent border-transparent text-bg"
-                  : "bg-bg border-border text-muted hover:border-[color:var(--color-border)]"
-              }`}
+              className={typeChipClass(active)}
             >
               {EVENT_TYPE_LABELS[t]}
             </button>
           );
         })}
+
+        {overflowTypes.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => setMoreTypesOpen((v) => !v)}
+              className="text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border border-border text-muted bg-bg whitespace-nowrap"
+              aria-expanded={moreTypesOpen}
+            >
+              Ещё {overflowTypes.length} {moreTypesOpen ? "▴" : "▾"}
+            </button>
+
+            {moreTypesOpen && (
+              <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-[220px] bg-surface border border-border rounded-xl p-3 shadow-[0_20px_50px_-30px_rgba(139,92,246,0.5)] flex flex-wrap gap-2">
+                {overflowTypes.map((t) => {
+                  const active = filters.types.has(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => toggleType(t)}
+                      className={typeChipClass(active)}
+                    >
+                      {EVENT_TYPE_LABELS[t]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <div className="w-px self-stretch bg-border flex-shrink-0" />

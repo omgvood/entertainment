@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { City, EventItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
-import { applyFilters, availableTypes, DEFAULT_FILTERS, type Filters } from "@/lib/filters";
+import { applyFilters, DEFAULT_FILTERS, typesByFrequency, type Filters } from "@/lib/filters";
 import { groupByDay } from "@/lib/dayGroups";
 import { addDaysUTC, formatDayMonth } from "@/lib/dateUtil";
 import { FilterBar } from "./FilterBar";
@@ -17,7 +17,7 @@ interface CityViewProps {
 }
 
 export function CityView({ events, city, today }: CityViewProps) {
-  const types = useMemo(() => availableTypes(events), [events]);
+  const types = useMemo(() => typesByFrequency(events), [events]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const tomorrow = useMemo(() => addDaysUTC(today, 1), [today]);
 
