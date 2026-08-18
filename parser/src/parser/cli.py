@@ -17,16 +17,19 @@ import argparse
 import asyncio
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 
 import httpx
 import structlog
 
-from .config import CityConfig, LlmProvider, Settings, SourceConfig, load_seeds
-from .db import make_client, sync_venues_from_events, upsert_venues
+from .config import DEDUP_CANDIDATE_SCORE, CityConfig, LlmProvider, Settings, SourceConfig, load_seeds
+from .db import delete_events_by_ids, fetch_events_for_dedup, make_client, sync_venues_from_events, upsert_events, upsert_venues
 from .discovery import ListingDiscovery, SitemapDiscovery
 from .extraction import DeepSeekExtractor, FallbackExtractor, GeminiExtractor, GroqExtractor, LLMExtractor
-from .models import ParsedEvent, Venue
+from .fuzzy import cluster_events
+from .merge import resolve_cluster
+from .models import EventRow, ParsedEvent, Venue
 from .pipeline import run_city
 from .validator import to_venue
 
@@ -379,6 +382,64 @@ def _cmd_sync_venues(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_dedup_backfill(args: argparse.Namespace) -> int:
+    """Разбор УЖЕ накопленных дублей. Safe-by-default: без --apply только печатает.
+
+    Ежедневный пайплайн умеет лишь не создавать новые дубли (write-time guard) — эта
+    команда чистит то, что накопилось до его появления. Удаление карточки убивает её URL,
+    поэтому шаг осознанный и разовый, под глазами человека.
+    """
+    settings = Settings.from_env()
+    _setup_logging(settings.log_level)
+    supabase = make_client(settings.supabase_url, settings.supabase_service_key)
+
+    cities = load_seeds()
+    if args.city not in cities:
+        print(f"Город {args.city!r} не описан в seeds.yaml", file=sys.stderr)
+        return 1
+    priorities = {s.name: s.priority for s in cities[args.city].sources}
+
+    today = date.today().isoformat()
+    resp = (
+        supabase.table("events")
+        .select("date")
+        .eq("city", args.city)
+        .neq("date", "always")
+        .gte("date", today)
+        .execute()
+    )
+    dates = sorted({r["date"] for r in resp.data or []})
+    rows = fetch_events_for_dedup(supabase, args.city, dates)
+    clusters, _pairs = cluster_events(
+        rows, merge_threshold=args.threshold, report_threshold=args.threshold
+    )
+
+    to_delete: list[str] = []
+    to_upsert: list[EventRow] = []
+    for cluster in clusters:
+        if len(cluster) == 1:
+            continue
+        winner, losers = resolve_cluster(cluster, priorities)
+        to_upsert.append(winner)
+        to_delete.extend(r.id for r in losers)
+        print(f"\n{cluster[0].date}  ▸ оставить: [{winner.source}] {winner.title}")
+        for loser in losers:
+            print(f"            удалить: [{loser.source}] {loser.title}")
+
+    print(
+        f"\nКластеров: {sum(1 for c in clusters if len(c) > 1)}, "
+        f"к удалению карточек: {len(to_delete)} (порог {args.threshold})"
+    )
+    if not args.apply:
+        print("dry-run (без записи) — запусти с --apply, чтобы применить")
+        return 0
+
+    upsert_events(supabase, to_upsert)
+    deleted = delete_events_by_ids(supabase, to_delete)
+    print(f"Обновлено победителей: {len(to_upsert)}, удалено дублей: {deleted}")
+    return 0
+
+
 async def _cmd_run(args: argparse.Namespace) -> int:
     """Полный пайплайн."""
     settings = Settings.from_env()
@@ -520,6 +581,23 @@ def main() -> int:
         help="Реально записать (без флага — dry-run). Перезапишет обогащения refresh-venues",
     )
 
+    p_db = sub.add_parser(
+        "dedup-backfill",
+        help="Разбор накопленных дублей. Safe-by-default: --apply для записи",
+    )
+    p_db.add_argument("--city", required=True)
+    p_db.add_argument(
+        "--threshold",
+        type=float,
+        default=DEDUP_CANDIDATE_SCORE,
+        help=f"Порог склейки (по умолчанию {DEDUP_CANDIDATE_SCORE}); понижай, чтобы увидеть больше",
+    )
+    p_db.add_argument(
+        "--apply",
+        action="store_true",
+        help="Реально удалить дубли (без флага — только печать)",
+    )
+
     p_run = sub.add_parser("run", help="Полный пайплайн")
     p_run.add_argument("--city", required=True)
     p_run.add_argument("--source", help="Имя одного источника")
@@ -559,6 +637,8 @@ def main() -> int:
         return asyncio.run(_cmd_refresh_venues(args))
     if args.cmd == "sync-venues":
         return _cmd_sync_venues(args)
+    if args.cmd == "dedup-backfill":
+        return _cmd_dedup_backfill(args)
     if args.cmd == "run":
         return asyncio.run(_cmd_run(args))
     return 1
