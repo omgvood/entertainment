@@ -87,3 +87,86 @@ def test_near_miss_same_venue_date_different_title():
     res = merge_rows([a, b], [], _PRI)
     assert len(res.rows_to_upsert) == 2  # разные id — оба остаются
     assert res.near_misses == 1
+
+
+from parser.merge import fuzzy_merge
+
+
+def test_fuzzy_new_row_does_not_duplicate_persisted_card():
+    """Главный сценарий: в БД уже есть карточка, источник принёс её же другими словами.
+
+    Новая строка не пишется отдельной карточкой, её поля дозаполняют существующую.
+    id/slug существующей не меняются — URL стабилен.
+    """
+    persisted = _row('Акция "Собака Обнимака"', "2026-08-16", "Сквер оперы", "vk-posts",
+                     time_start="14:00")
+    fresh = _row('АКЦИЯ "СОБАКА ОБНИМАКА": ОБНИМИ ПСА И ПОМОГИ ПРИЮТАМ!', "2026-08-16",
+                 "Сквер оперы", "telegram-posts", time_start="14:00",
+                 description="Из телеграма")
+    res = fuzzy_merge([fresh, persisted], [persisted], _PRI)
+    assert len(res.rows_to_upsert) == 1
+    assert res.rows_to_upsert[0].id == persisted.id
+    assert res.rows_to_upsert[0].description == "Из телеграма"
+    assert res.fuzzy_merged == 1
+
+
+def test_fuzzy_persisted_wins_over_higher_priority_newcomer():
+    """Стабильность URL важнее приоритета: иначе slug уедет и страница выпадет из индекса."""
+    persisted = _row("День открытых дверей в Автопрестиж", "2026-08-16", "Автопрестиж",
+                     "vk-posts", time_start="14:00")
+    fresh = _row("День открытых дверей в Автопрестиж (Воскресенье)", "2026-08-16",
+                 "Автопрестиж", "timepad", time_start="14:00")
+    res = fuzzy_merge([fresh, persisted], [persisted], _PRI)
+    assert [r.id for r in res.rows_to_upsert] == [persisted.id]
+
+
+def test_fuzzy_two_fresh_rows_resolved_by_priority():
+    """Обе строки новые — решает priority источника."""
+    a = _row("Обзорная экскурсия по текущим выставкам", "2026-08-18", "ПЕРММ",
+             "vk-posts", time_start="18:30")
+    b = _row("Обзорные экскурсии по текущим выставкам музея ПЕРММ", "2026-08-18", "ПЕРММ",
+             "timepad", time_start="18:30")
+    res = fuzzy_merge([a, b], [], _PRI)
+    assert len(res.rows_to_upsert) == 1
+    assert res.rows_to_upsert[0].source == "timepad"
+
+
+def test_fuzzy_two_persisted_rows_are_left_alone():
+    """Обе карточки уже в БД — ежедневный прогон их не сливает (это работа dedup-backfill).
+
+    Выбрасывание строки из upsert её не удалит, только сделает данные несвежими.
+    """
+    a = _row('Акция "Собака Обнимака"', "2026-08-16", "Сквер", "vk-posts", time_start="14:00")
+    b = _row('АКЦИЯ "СОБАКА ОБНИМАКА": ОБНИМИ ПСА', "2026-08-16", "Сквер", "vk-posts",
+             time_start="14:00")
+    res = fuzzy_merge([a, b], [a, b], _PRI)
+    assert len(res.rows_to_upsert) == 2
+    assert res.fuzzy_merged == 0
+    assert len(res.candidates) == 1
+
+
+def test_fuzzy_in_source_duplicates_counted_separately():
+    """Дубль внутри одного источника не должен портить KPI unique_events_ratio."""
+    a = _row("День рождения парка", "2026-08-16", "Парк", "vk-posts", time_start="13:00")
+    b = _row("День рождения парка (концерт)", "2026-08-16", "Парк", "vk-posts",
+             time_start="13:00")
+    res = fuzzy_merge([a, b], [], _PRI)
+    assert res.fuzzy_merged == 1
+    assert res.fuzzy_merged_in_source == 1
+
+
+def test_fuzzy_different_events_untouched():
+    """Разные сеансы в одном планетарии — обе строки выживают."""
+    a = _row("Парад планет", "2026-08-16", "Планетарий", "vk-posts", time_start="10:30")
+    b = _row("Где живёт Земля", "2026-08-16", "Планетарий", "vk-posts", time_start="12:00")
+    res = fuzzy_merge([a, b], [], _PRI)
+    assert len(res.rows_to_upsert) == 2
+    assert res.fuzzy_merged == 0
+
+
+def test_fuzzy_db_pool_row_not_written_when_untouched():
+    """Строки из пула БД, ни с чем не совпавшие, в upsert не попадают (не переписываем город)."""
+    fresh = _row("Новый концерт", "2026-08-16", "Арена", "timepad", time_start="19:00")
+    unrelated = _row("Старая лекция", "2026-08-16", "Музей", "vk-posts", time_start="12:00")
+    res = fuzzy_merge([fresh], [unrelated], _PRI)
+    assert [r.id for r in res.rows_to_upsert] == [fresh.id]

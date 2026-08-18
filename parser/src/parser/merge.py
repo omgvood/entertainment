@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 
 import structlog
 
+from .config import DEDUP_CANDIDATE_SCORE, DEDUP_MERGE_SCORE
+from .fuzzy import ScoredPair, cluster_events
 from .models import EventRow
 from .taxonomy import filter_tags
 from .validator import _normalize
@@ -113,9 +115,9 @@ def merge_rows(
 
 
 def _count_near_misses(incoming: list[EventRow], existing: list[EventRow]) -> int:
-    """Близкие дубли: та же площадка + дата, но разные id (разные названия) — кандидаты на
+    """Близкие дубли: та же площадка + дата, но разные id (разные названия) — сырой сигнал
 
-    будущий fuzzy-матчинг. Не схлопываем (риск ложных слияний), только считаем.
+    для сравнения с fuzzy-метрикой. Не схлопываем (риск ложных слияний), только считаем.
     """
     by_key: dict[tuple[str, str], set[str]] = {}
     for r in [*incoming, *existing]:
@@ -124,3 +126,102 @@ def _count_near_misses(incoming: list[EventRow], existing: list[EventRow]) -> in
             continue
         by_key.setdefault((venue, r.date), set()).add(r.id)
     return sum(len(ids) - 1 for ids in by_key.values() if len(ids) > 1)
+
+
+@dataclass
+class FuzzyResult:
+    rows_to_upsert: list[EventRow] = field(default_factory=list)
+    fuzzy_merged: int = 0
+    """Сколько новых карточек НЕ создано (строк схлопнуто)."""
+    fuzzy_merged_in_source: int = 0
+    """Из них — дубли внутри одного источника (KPI unique_events_ratio их не считает)."""
+    largest_cluster: int = 0
+    """Размер наибольшего кластера: >3 — сигнал, что порог поехал и склеивает лишнее."""
+    candidates: list[ScoredPair] = field(default_factory=list)
+
+
+def _pick_winner(rows: list[EventRow], priorities: dict[str, int]) -> EventRow:
+    """Победитель кластера: выше priority, при равенстве — лексикографически меньший id.
+
+    Детерминированность важнее «лучшести»: иначе победитель, а с ним slug и URL,
+    прыгал бы между прогонами при смене порядка источников.
+    """
+    return min(rows, key=lambda r: (-priorities.get(r.source, 0), r.id))
+
+
+def resolve_cluster(
+    cluster: list[EventRow],
+    priorities: dict[str, int],
+    *,
+    prefer: list[EventRow] | None = None,
+) -> tuple[EventRow, list[EventRow]]:
+    """Кластер дублей → (обогащённый победитель, проигравшие).
+
+    Публичная точка входа: ею пользуются и слой 2 в пайплайне, и разовая команда
+    dedup-backfill — правило выбора победителя обязано быть одно на оба пути.
+
+    prefer — подмножество, из которого победитель обязан быть выбран. В пайплайне это
+    уже записанные строки: их id — живой URL, и менять его нельзя.
+    """
+    winner = _pick_winner(prefer or cluster, priorities)
+    losers = [r for r in cluster if r.id != winner.id]
+    return _enrich(winner, losers), losers
+
+
+def fuzzy_merge(
+    rows: list[EventRow],
+    existing: list[EventRow],
+    priorities: dict[str, int],
+) -> FuzzyResult:
+    """Слой 2: не даёт создать новую карточку событию, которое уже есть под другим названием.
+
+    rows     — то, что собирались писать (результат merge_rows).
+    existing — события города на затронутые даты из БД (пул кандидатов; в dry-run пуст).
+
+    Write-time guard: ежедневный прогон умеет только не создавать новый id. Кластер из
+    одних уже записанных строк не трогаем — выбросив такую строку из upsert, мы её не
+    удалим, а лишь перестанем обновлять. Такие пары уходят в candidates → dedup-backfill.
+    """
+    result = FuzzyResult()
+    by_id = {r.id: r for r in rows}
+    persisted_ids = {r.id for r in existing}
+    pool = [r for r in existing if r.id not in by_id]
+
+    clusters, pairs = cluster_events(
+        [*rows, *pool],
+        merge_threshold=DEDUP_MERGE_SCORE,
+        report_threshold=DEDUP_CANDIDATE_SCORE,
+    )
+    result.candidates = pairs
+
+    kept: list[EventRow] = []
+    for cluster in clusters:
+        result.largest_cluster = max(result.largest_cluster, len(cluster))
+        if len(cluster) == 1:
+            row = cluster[0]
+            if row.id in by_id:
+                kept.append(row)
+            continue
+
+        persisted = [r for r in cluster if r.id in persisted_ids]
+        fresh = [r for r in cluster if r.id not in persisted_ids]
+
+        if not fresh:
+            # Все карточки уже в БД — оставляем как есть, разбирать их будет dedup-backfill.
+            kept.extend(r for r in cluster if r.id in by_id)
+            continue
+
+        winner, losers = resolve_cluster(cluster, priorities, prefer=persisted or None)
+        kept.append(winner)
+        # Уцелевшие записанные карточки, не ставшие победителем, продолжают жить своей жизнью.
+        kept.extend(r for r in persisted if r.id != winner.id and r.id in by_id)
+
+        for loser in losers:
+            if loser.id in persisted_ids:
+                continue  # записанную карточку слой 2 не убирает
+            result.fuzzy_merged += 1
+            if loser.source == winner.source:
+                result.fuzzy_merged_in_source += 1
+
+    result.rows_to_upsert = kept
+    return result
