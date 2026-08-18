@@ -5,6 +5,11 @@
  * (571 карточка для Перми): сайт статический, runtime-запросов нет.
  */
 
+import type { EventItem, VenueItem } from "./types";
+import { EVENT_TYPE_LABELS, getVenueTypeLabel } from "./types";
+import { priceKind } from "./price";
+import { TYPE_SYNONYMS, VENUE_TYPE_SYNONYMS } from "./search-synonyms";
+
 export type MatchKind = "exact" | "morph" | "none";
 
 export function normalize(s: string): string {
@@ -38,4 +43,57 @@ export function tokensMatch(a: string, b: string): MatchKind {
   let common = 0;
   while (common < min && a[common] === b[common]) common++;
   return common >= need ? "morph" : "none";
+}
+
+export interface DocField {
+  weight: number;
+  tokens: string[];
+}
+
+export interface SearchDoc<T> {
+  item: T;
+  fields: DocField[];
+  /** Нормализованное название — для фразового бонуса. */
+  titleText: string;
+  /** Нормализованное имя площадки — для фразового бонуса. */
+  venueText: string;
+}
+
+export function buildEventDoc(event: EventItem): SearchDoc<EventItem> {
+  const typeWords = [EVENT_TYPE_LABELS[event.type], ...TYPE_SYNONYMS[event.type]].join(" ");
+  // Синтетический токен по price_text, а не по price_max: нулевая цена в БД
+  // означает и «бесплатно», и «неизвестно», см. lib/price.ts.
+  const freeWords = priceKind(event) === "free" ? "бесплатно free вход свободный" : "";
+
+  return {
+    item: event,
+    fields: [
+      { weight: 100, tokens: tokenize(event.title) },
+      { weight: 60, tokens: tokenize(typeWords) },
+      { weight: 50, tokens: tokenize(event.venueName) },
+      { weight: 30, tokens: tokenize(event.organizer ?? "") },
+      { weight: 20, tokens: tokenize([...event.tags, freeWords].join(" ")) },
+      { weight: 10, tokens: tokenize(event.description ?? "") },
+    ],
+    titleText: normalize(event.title),
+    venueText: normalize(event.venueName),
+  };
+}
+
+export function buildVenueDoc(venue: VenueItem): SearchDoc<VenueItem> {
+  const typeWords = [
+    getVenueTypeLabel(venue.type),
+    ...(VENUE_TYPE_SYNONYMS[venue.type] ?? []),
+  ].join(" ");
+
+  return {
+    item: venue,
+    fields: [
+      { weight: 100, tokens: tokenize(venue.name) },
+      { weight: 60, tokens: tokenize(typeWords) },
+      { weight: 15, tokens: tokenize(venue.address ?? "") },
+    ],
+    titleText: normalize(venue.name),
+    venueText: "",
+  };
 }
