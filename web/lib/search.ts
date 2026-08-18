@@ -8,7 +8,8 @@
 import type { EventItem, VenueItem } from "./types";
 import { EVENT_TYPE_LABELS, getVenueTypeLabel } from "./types";
 import { priceKind } from "./price";
-import { TYPE_SYNONYMS, VENUE_TYPE_SYNONYMS } from "./search-synonyms";
+import { TYPE_SYNONYMS, VENUE_TYPE_SYNONYMS, INTENT_SYNONYMS, STOP_WORDS } from "./search-synonyms";
+import { addDaysUTC } from "./dateUtil";
 
 export type MatchKind = "exact" | "morph" | "none";
 
@@ -96,4 +97,136 @@ export function buildVenueDoc(venue: VenueItem): SearchDoc<VenueItem> {
     titleText: normalize(venue.name),
     venueText: "",
   };
+}
+
+const MORPH_FACTOR = 0.6;
+const PHRASE_TITLE_BONUS = 100;
+const PHRASE_VENUE_BONUS = 50;
+const BOOST_SOON = 15;
+const BOOST_IMAGE = 5;
+
+export interface QueryTerm {
+  /** Сам токен плюс токены тегов, в которые он разворачивается. */
+  variants: string[];
+}
+
+/** Предрассчитанный разворот намерений: слово пользователя → токены тега. */
+const INTENT_INDEX = Object.entries(INTENT_SYNONYMS).map(([tag, synonyms]) => ({
+  tagTokens: tokenize(tag).filter((t) => !STOP_WORDS.has(t)),
+  triggers: [tag, ...synonyms].flatMap(tokenize).filter((t) => !STOP_WORDS.has(t)),
+}));
+
+function expandIntent(token: string): string[] {
+  const out: string[] = [];
+  for (const entry of INTENT_INDEX) {
+    if (entry.triggers.some((trigger) => tokensMatch(token, trigger) !== "none")) {
+      out.push(...entry.tagTokens);
+    }
+  }
+  return out;
+}
+
+export function parseQuery(query: string): QueryTerm[] {
+  return tokenize(query)
+    .filter((t) => !STOP_WORDS.has(t))
+    .map((t) => ({ variants: [t, ...expandIntent(t)] }));
+}
+
+/**
+ * Скор документа или null, если хотя бы один термин не найден (AND-семантика).
+ * Для каждого термина берём лучшее поле, а не сумму по полям: иначе слово,
+ * встречающееся и в названии, и в описании, весит больше точного попадания
+ * в название, и длинные описания начинают выигрывать.
+ */
+export function scoreDoc<T>(
+  doc: SearchDoc<T>,
+  terms: QueryTerm[],
+  phrase: string,
+): number | null {
+  let score = 0;
+
+  for (const term of terms) {
+    let best = 0;
+    for (const field of doc.fields) {
+      if (field.weight <= best) continue; // лучше уже не станет
+      for (const docToken of field.tokens) {
+        for (const variant of term.variants) {
+          const kind = tokensMatch(variant, docToken);
+          if (kind === "none") continue;
+          const value = field.weight * (kind === "exact" ? 1 : MORPH_FACTOR);
+          if (value > best) best = value;
+        }
+      }
+    }
+    if (best === 0) return null;
+    score += best;
+  }
+
+  // Фразовый бонус осмыслен только для многословных запросов: для одного слова
+  // он повторяет то, что уже посчитал точный матч.
+  if (terms.length >= 2) {
+    if (doc.titleText.includes(phrase)) score += PHRASE_TITLE_BONUS;
+    if (doc.venueText.includes(phrase)) score += PHRASE_VENUE_BONUS;
+  }
+
+  return score;
+}
+
+export interface EventHit {
+  kind: "event";
+  item: EventItem;
+  score: number;
+}
+
+export interface VenueHit {
+  kind: "venue";
+  item: VenueItem;
+  score: number;
+}
+
+export type SearchHit = EventHit | VenueHit;
+
+export function searchEvents(
+  docs: SearchDoc<EventItem>[],
+  query: string,
+  today: string,
+): EventHit[] {
+  const terms = parseQuery(query);
+  if (terms.length === 0) return [];
+
+  const phrase = normalize(query);
+  const tomorrow = addDaysUTC(today, 1);
+  const hits: EventHit[] = [];
+
+  for (const doc of docs) {
+    const base = scoreDoc(doc, terms, phrase);
+    if (base === null) continue;
+
+    let score = base;
+    // Бусты поднимают, но никогда не отсекают.
+    if (doc.item.date === today || doc.item.date === tomorrow) score += BOOST_SOON;
+    if (doc.item.imageUrl) score += BOOST_IMAGE;
+
+    hits.push({ kind: "event", item: doc.item, score });
+  }
+
+  hits.sort((a, b) => b.score - a.score || a.item.date.localeCompare(b.item.date));
+  return hits;
+}
+
+export function searchVenues(docs: SearchDoc<VenueItem>[], query: string): VenueHit[] {
+  const terms = parseQuery(query);
+  if (terms.length === 0) return [];
+
+  const phrase = normalize(query);
+  const hits: VenueHit[] = [];
+
+  for (const doc of docs) {
+    const score = scoreDoc(doc, terms, phrase);
+    if (score === null) continue;
+    hits.push({ kind: "venue", item: doc.item, score });
+  }
+
+  hits.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
+  return hits;
 }
