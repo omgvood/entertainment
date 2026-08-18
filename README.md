@@ -127,6 +127,8 @@ Vercel CDN ← пользователь
 | **Truncate текстовых полей** | `title`/`description` длиннее лимита (300/500) раньше роняли **весь** `ParsedEvent` через `max_length` у `Field` (одно длинное поле → потеря события; в логах — россыпь `extract.batch.item_invalid … string_too_long`). Лимит прикладной (карточка на фронте), не constraint БД (там `text`). Теперь `field_validator(mode="before")` режет строку срезом до валидации — событие сохраняется усечённым | `models.ParsedEvent._truncate_text`, `models._TEXT_LIMITS` |
 | **Батчинг постов по объёму текста** | VK/TG-посты клеились в LLM-вызов пачками фиксированного размера (`POST_BATCH_SIZE`), не считаясь с длиной. Теперь батч набирается жадно по суммарным символам (`POST_BATCH_MAX_CHARS`, дефолт 7000) с потолком по счётчику: короткие посты паковываются плотнее (меньше вызовов → экономия дневной квоты Gemini), длинные — малыми пачками (без путаницы модели/TPM). Сверхдлинный пост уходит отдельной пачкой целиком | `pipeline._chunks_by_budget`, `config.Settings.post_batch_max_chars` |
 | **Fast-fail на суточной квоте** | При исчерпании дневной квоты Gemini free-tier (20 запросов/сутки на модель, `RESOURCE_EXHAUSTED` + `GenerateRequestsPerDayPerProjectPerModel`) `with_retry` раньше делал 3 бесполезных ретрая с backoff — квота до конца суток не восстановится. Теперь такой лимит отличается от временной перегрузки (503/TPM) и пробрасывается сразу → `FallbackExtractor` без задержки переключается на следующего провайдера | `extraction/_errors.is_daily_quota_exhausted`, `extraction/retry.with_retry` |
+| **Неоновый редизайн фронта** | Тёмная неоновая тема: токены в `globals.css`, единые стили бейджей/плейсхолдеров событий. Главная перестроена с «сетка + сайдбар» на **hero + горизонтальный `FilterBar` + секции «Сегодня / Завтра / Дальше»** (`Sidebar.tsx` удалён). Карточка показывает площадку, описание и теги; битая картинка источника падает на emoji-заглушку | `web/app/globals.css`, `lib/event-styles.ts`, `components/CityView.tsx`, `components/FilterBar.tsx`, `components/CardImage.tsx` |
+| **Таймзона города на фронте** | «Сегодня» считается в таймзоне города (`getCityToday`), а не в UTC сервера сборки — билд идёт в 21:00 UTC, из-за чего дата уезжала на сутки. Дальше эта строка передаётся вниз пропом, а вся арифметика дат идёт над строками `YYYY-MM-DD` через UTC-компоненты — группировка по дням и фильтр «Когда» не зависят от таймзоны браузера | `lib/events.getCityToday`, `lib/dateUtil.ts`, `lib/dayGroups.ts` |
 
 Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
 
@@ -196,6 +198,9 @@ entertainment/
 │   │   ├── test_jsonld.py          — extract_jsonld_events (Schema.org JSON-LD)
 │   │   ├── test_kudago.py          — KudaGoClient (маппинг категорий)
 │   │   ├── test_merge.py           — merge_rows (priority, enrichment, near_misses)
+│   │   ├── test_candidate_sources.py — поисковые провайдеры, circuit breaker, суффиксный фильтр доменов, авто-апрув
+│   │   ├── test_permm.py           — ПЕРММ: маппинг /json/* → ParsedEvent (фикстуры, без сети)
+│   │   ├── test_permopera.py       — Театр оперы: разбор HTML-в-JSON афиши (фикстура)
 │   │   ├── test_playwright_2gis.py — parse_cards (HTML-фикстура, без браузера/сети)
 │   │   ├── test_telegram.py        — parse_channel_html, TelegramHtmlProvider
 │   │   ├── test_spurious_always.py — is_spurious_always, guard to_event_row, _safe_to_event_row, промпты
@@ -210,6 +215,7 @@ entertainment/
 │   ├── migrations/                — SQL-миграции схемы (tags, fingerprint, raw_documents, …)
 │   └── seeds/
 │       ├── sochi_events.sql        — тестовые данные: события Сочи
+│       ├── venues.sql              — бекап таблицы venues (снимок от export-venues, обновляет backup_venues.yml)
 │       └── venues_backfill.sql     — одноразовый перенос events(always) → venues (первичное наполнение)
 │
 ├── web/                            — Next.js 16 фронтенд
@@ -231,21 +237,25 @@ entertainment/
 │   │           ├── page.tsx        — каталог площадок Сочи
 │   │           └── [slug]/page.tsx — детальная страница площадки Сочи
 │   ├── components/
-│   │   ├── Header.tsx              — шапка с переключателем городов
-│   │   ├── CityView.tsx            — сетка карточек + SEO-описание
-│   │   ├── Sidebar.tsx             — панель фильтров
+│   │   ├── Header.tsx              — шапка с логотипом и переключателем городов
+│   │   ├── CityView.tsx            — hero + FilterBar + секции «Сегодня/Завтра/Дальше» + SEO-описание
+│   │   ├── FilterBar.tsx           — горизонтальная панель фильтров (поиск, чипы типов, «Когда», поповер «Ещё фильтры»)
 │   │   ├── EventCard.tsx           — карточка события
+│   │   ├── CardImage.tsx           — изображение карточки с фолбэком на emoji-плейсхолдер при ошибке загрузки
 │   │   ├── VenueCard.tsx           — карточка площадки (ссылка на /{city}/venues/{slug}/)
 │   │   ├── VenueDetail.tsx         — детальная страница площадки (фото, адрес, карта 2ГИС)
 │   │   ├── VenuesCatalog.tsx       — каталог площадок города (страница /{city}/venues/)
 │   │   └── VenuesSection.tsx       — секция «Постоянные места» на главной (до 8 карточек)
 │   ├── lib/
-│   │   ├── types.ts                — EventItem, VenueItem, City, CITY_CONFIG
-│   │   ├── events.ts               — запросы к Supabase (getEventsByCity, getEventBySlug)
+│   │   ├── types.ts                — EventItem, VenueItem, City, CITY_CONFIG, EVENT_TYPE_LABELS
+│   │   ├── events.ts               — запросы к Supabase (getEventsByCity, getEventBySlug) + getCityToday
 │   │   ├── venues.ts               — запросы к Supabase (getVenuesByCity, getVenueBySlug)
 │   │   ├── venue-meta.ts           — SEO-хелперы площадок (metadata, JSON-LD, род. падеж города)
 │   │   ├── venue-styles.ts         — стили карточек/бейджей по типу площадки
-│   │   ├── filters.ts              — клиентская фильтрация событий
+│   │   ├── event-styles.ts         — неоновые бейджи и градиенты-плейсхолдеры по EventType
+│   │   ├── dateUtil.ts             — арифметика календарных дат в UTC (addDaysUTC, formatDayMonth)
+│   │   ├── dayGroups.ts            — раскладка событий по корзинам сегодня/завтра/дальше
+│   │   ├── filters.ts              — клиентская фильтрация событий + typesByFrequency
 │   │   └── supabase.ts             — Supabase client (anon key, read-only)
 │   ├── CLAUDE.md                   — инструкции Claude Code для фронтенда
 │   ├── AGENTS.md                   — инструкции агентов
@@ -258,7 +268,9 @@ entertainment/
 │   └── refresh_venues.yml          — сбор venues из 2ГИС раз в 2 недели (API / Playwright fallback)
 │
 ├── input-output/                   — образцы JSON/xlsx/yaml, PDF-экспорт readme, ключи SSH
-├── prototype/                      — ранний UI-прототип (HTML/CSS)
+├── prototype/                      — статические UI-макеты (HTML/CSS/JS, вне сборки)
+│   ├── sprint-0/                   — первый прототип (светлая тема)
+│   └── redesign/                   — интерактивный макет редизайна (светлая тема, фиолетовый акцент)
 └── docs/
     ├── Конвертер yaml-xlsx/        — утилиты seeds.yaml ↔ Excel
     │   ├── make_seeds_excel.py     — генерирует seeds_editor.xlsx из seeds.yaml (openpyxl)
@@ -1752,63 +1764,81 @@ Next.js 16 App Router, полностью статический (SSG), React 19
 | `/sitemap.xml` | Автогенерация из БД при деплое |
 | `/robots.txt` | Allow all + ссылка на sitemap |
 
+### Тема оформления
+
+UI построен по тёмному неоновому макету. Тема **одна** — светлого варианта нет; источник правды по
+цветам — сам `app/globals.css` (макеты в `prototype/` остались от прошлой, светлой итерации):
+
+- **Токены** — `app/globals.css`, блок `@theme inline` Tailwind v4: `--color-bg` `#0a0915`, `--color-surface` `#14121f`, `--color-border` `#2b2440`, `--color-ink` `#f3f0fa`, `--color-muted` `#a89dc4`, акценты `--color-accent` `#ff3d7f` (розовый) и `--color-accent-cyan` `#35e0c8`.
+- **Бейджи и плейсхолдеры событий** — `lib/event-styles.ts`: `eventBadgeStyle(type)` (цвет бейджа) и `eventPlaceholder(type)` (градиент + emoji для карточки без фото). Единая точка правды — раньше таблицы дублировались в `EventCard.tsx` и в обеих `[slug]/page.tsx`. Классы записаны **полными литералами**: Tailwind сканирует исходники статически и не найдёт класс, собранный из переменной в шаблонной строке.
+- **Шрифт** — Geist (`next/font/google`) с подмножествами `latin` + `cyrillic`.
+
 ### Ключевые файлы
 
 **`app/layout.tsx`**
 - Метаданные по умолчанию: шаблон `<title>`, описание
 - Верификация Google / Яндекс через `env`-переменные
-- Yandex Metrika: вставляет счётчик через `NEXT_PUBLIC_YM_ID`
+- Yandex Metrika: вставляет счётчик через `NEXT_PUBLIC_YM_ID` (+ `<noscript>`-пиксель)
 
 **`app/perm/page.tsx`** / **`app/sochi/page.tsx`**
-- Server Component, вызывает `getEventsByCity(city)` при сборке
-- Формирует SEO-метаданные страницы города
-- Рендерит `<Header>` + `<CityView>` + `<Footer>`
+- Server Component; считает `getCityToday(city)` и параллельно тянет `getEventsByCity(city, today)` + `getVenuesByCity(city)`
+- Формирует SEO-метаданные страницы города из `CITY_CONFIG`
+- Рендерит `<Header>` + `<CityView>` + `<VenuesSection>` (если площадки есть) + инлайновый `<footer>`
 
 **`app/perm/events/[slug]/page.tsx`** (аналогично для Сочи)
 - `generateStaticParams()` — генерирует список всех slug при сборке
-- `generateMetadata()` — динамические `<title>` / `<description>` / Open Graph
-- Рендер: изображение (или emoji-заглушка с градиентом) · тип (цветной бейдж) · название · дата/время · цена · адрес · описание · кнопка «Перейти к источнику»
+- `generateMetadata()` — динамические `<title>` / `<description>` / Open Graph (с фолбэком на `meta_title`/`meta_description` из БД)
+- Рендер: hero-изображение 21:9 (или градиентная emoji-заглушка) · бейдж типа · название · площадка · описание · блок адреса · «Когда» и «Организатор» · цена + кнопка «Перейти к источнику»
 
 **`lib/events.ts`**
-- `getEventsByCity(city)` — запрос к Supabase: `city=X AND (date='always' OR date>=today)`, сортировка по дате
+- `getCityToday(city)` — **единственное место в кодовой базе**, где текущий момент превращается в календарную дату. Считает «сегодня» в таймзоне города (`perm` → `Asia/Yekaterinburg`, `sochi` → `Europe/Moscow`), а не в UTC сервера сборки: билд идёт в 21:00 UTC, и без этого дата уезжала на сутки
+- `getEventsByCity(city, today)` — запрос к Supabase: `city=X AND date != 'always' AND date >= today`, сортировка по дате. `.neq('date','always')` обязателен: в строковом сравнении Postgres `'always' >= 'YYYY-MM-DD'` истинно, поэтому один `.gte` площадки не отсекает. Площадки живут в `venues`, в сетку событий не попадают
 - `getEventBySlug(city, slug)` — для детальной страницы
 - `rowToEvent()` — snake_case строка БД → camelCase `EventItem` TypeScript
 
 **`lib/filters.ts`** — клиентская фильтрация без запросов к серверу:
-- По типу события
-- По дате (сегодня / завтра / выходные)
-- По цене (диапазон)
-- Чекбокс «только с фиксированной датой» (скрывает `always`-события)
+- По типу события (набор выбранных `EventType`)
+- По дате: `today` / `tomorrow` / `weekend` (ближайшие Сб+Вс в окне 7 дней) / `any`
+- По цене — пересечение диапазона события с диапазоном фильтра
+- `availableTypes(events)` — типы, реально присутствующие в городе; `typesByFrequency(events)` — они же по убыванию числа событий (порядок чипов в `FilterBar`)
+- `DEFAULT_FILTERS` — все типы, `when: 'any'`, цена 0–5000. SSR-mismatch невозможен: серверный prerender использует именно их, а даты в этом состоянии не задействованы
+
+**`lib/dateUtil.ts`** — `addDaysUTC(ymd, n)` и `formatDayMonth(ymd)` («8 августа»). Вся арифметика над строками `YYYY-MM-DD` идёт через UTC-компоненты, поэтому результат не зависит от таймзоны сервера сборки или браузера.
+
+**`lib/dayGroups.ts`** — `groupByDay(events, today)` раскладывает уже отфильтрованный список на корзины `today` / `tomorrow` / `later`. Своего `new Date()` не заводит — только сравнивает строки.
 
 **`lib/types.ts`** — типы TypeScript:
 - `EventItem` — зеркало `EventRow` в camelCase (включая `tags: string[]`)
-- `CITY_CONFIG` — метаданные городов (label, path, metaTitle, description)
-- `EVENT_TYPE_LABELS` — отображаемые названия типов
+- `CITY_CONFIG` — метаданные городов: `label`, `path`, `metaTitle`, `metaDescription`, `description` (SEO-текст) и `heroPrefix` («Ночная» Пермь / «Ночной» Сочи — чтобы заголовок был грамматически согласован)
+- `EVENT_TYPE_LABELS` / `VENUE_TYPE_LABELS` — отображаемые названия типов
 
 ### Компоненты
 
-**`Header.tsx`** — липкая шапка:
-- Логотип / название сайта
-- Переключатель городов (подсвечивает активный)
-- Поле поиска (placeholder, пока не функционален)
+**`Header.tsx`** — липкая шапка: логотип «Афиша.PRM» (градиентный суффикс) + переключатель городов, подсвечивающий активный. Поиска здесь больше нет — он переехал в `FilterBar`.
 
-**`EventCard.tsx`** — карточка события в сетке:
-- Изображение или заглушка с эмодзи типа
-- Цветной бейдж типа
-- Название, дата, цена, площадка
+**`CityView.tsx`** — главная города (client component, получает готовое `today` пропом):
+- Hero: надзаголовок «Куда сходить сегодня», заголовок `{heroPrefix} {Город} ждёт` и счётчик найденного
+- `<FilterBar>` с типами, отсортированными по частоте
+- Три секции-`DaySection`: «Сегодня», «Завтра», «Дальше» — с календарной датой рядом с заголовком и счётчиком-пилюлей; пустая секция не рендерится
+- Сетка карточек: 2 колонки на мобильном, 3 на планшете, 4 на десктопе
+- «Сегодня» и «Завтра» **не зависят** от вкладки «Когда» — она сужает только секцию «Дальше»; тип и цена применяются ко всем трём
+- `EmptyState` с кнопкой сброса фильтров + SEO-текстовый блок для индексации
 
-**`CityView.tsx`** — страница города:
-- Сетка карточек (4 колонки desktop, 2 mobile)
-- Sidebar с фильтрами
-- SEO-текстовый блок для индексации
+**`FilterBar.tsx`** — горизонтальная панель фильтров над сеткой:
+- Поле поиска (placeholder, пока не функционально)
+- Чипы типов: первые 4 видимы, остальные — в поповере «Ещё N»
+- Сегментированный переключатель «Когда»: Сегодня / Завтра / Выходные / Любая
+- Поповер «Ещё фильтры»: диапазон цены + фильтр по району (задизейблен, бейдж «скоро»)
 
-**`Sidebar.tsx`** — панель фильтров (тип, дата, цена)
+**`EventCard.tsx`** — карточка события в сетке: изображение (через `CardImage`), бейдж типа, название, площадка, описание в 2 строки, до 2 тегов, дата/цена/адрес.
+
+**`CardImage.tsx`** — изображение карточки (client component): отсекает `.svg` (иконки рейтинга/сложности не годятся как обложка) и переключается на градиентную emoji-заглушку по `onError`, если картинка источника отдаёт ошибку.
 
 **`VenueCard.tsx`** — карточка площадки в каталоге: фото (или emoji-заглушка), цветной бейдж типа, название, адрес; ссылка на `/{city}/venues/{slug}/`.
 
 **`VenuesCatalog.tsx`** — страница `/{city}/venues/`: заголовок, сетка VenueCard. Хлебная крошка → главная.
 
-**`VenuesSection.tsx`** — секция «Постоянные места» на главной: показывает до 8 площадок + ссылку «Все места» на каталог.
+**`VenuesSection.tsx`** — секция «Постоянные места» на главной: показывает до 8 площадок + ссылку «Все площадки» на каталог.
 
 **`VenueDetail.tsx`** — детальная страница площадки: изображение, бейдж типа, адрес, район, дата обновления, ссылка «Найти на 2ГИС» (поиск по имени+адресу). JSON-LD (`SportsActivityLocation` + `BreadcrumbList`) и Open Graph генерируются в `lib/venue-meta.ts`.
 
@@ -1830,11 +1860,12 @@ Next.js 16 App Router, полностью статический (SSG), React 19
 
 ### SEO
 
-- `<title>` + `<meta description>` на каждой странице
+- `<title>` + `<meta description>` на каждой странице (шаблон в `layout.tsx`, значения — из `CITY_CONFIG` и `generateMetadata`)
 - Open Graph теги для соцсетей
-- Schema.org Event JSON-LD на детальных страницах
-- Canonical URL
-- `sitemap.xml` генерируется из БД при каждом деплое
+- Schema.org JSON-LD — **только на страницах площадок** (`SportsActivityLocation` + `BreadcrumbList`, см. `lib/venue-meta.ts`). На страницах событий разметки `Event` пока нет — см. п. 13 в «Что осталось сделать»
+- Canonical URL — тоже только на страницах площадок (`alternates.canonical` в `buildVenueMetadata`)
+- SEO-текстовый блок про город внизу главной (`CITY_CONFIG[city].description`)
+- `sitemap.xml` генерируется из БД при каждом деплое: главные городов, каталоги площадок, страницы событий и площадок
 
 ---
 
@@ -2192,29 +2223,40 @@ Supabase Table Editor добавить вручную заведения, кот
 (FK из `events`).
 
 **12. Функциональный поиск** 💡  
-Сейчас поле поиска в шапке — заглушка. Варианты реализации: клиентский full-text поиск через
+Поле поиска живёт в `FilterBar` (переехало из шапки при редизайне) и пока остаётся заглушкой —
+ввод ни на что не влияет. Варианты реализации: клиентский full-text поиск через
 Postgres `ts_vector` (при сборке) или клиентская библиотека (Fuse.js / MiniSearch по загруженным
 событиям, без запросов к серверу).
+
+**13. Schema.org `Event` на страницах событий** 📋  
+Площадки размечены (`SportsActivityLocation` + `BreadcrumbList` в `lib/venue-meta.ts`), а страницы
+событий — нет: ни JSON-LD `Event`, ни canonical. Для афиши это основная разметка (сниппеты с датой
+и ценой в выдаче). Делается по образцу `venue-meta.ts` — хелпер `event-meta.ts` + вставка в обе
+`events/[slug]/page.tsx`.
+
+**14. Фильтр по району** 📋  
+В поповере «Ещё фильтры» блок «Район» отрисован с бейджем «скоро» и задизейбленными чекбоксами
+(жёстко зашиты районы Перми). `district` в БД заполняется не у всех источников — сначала оценить
+покрытие поля, потом строить список районов из данных города, а не из константы.
 
 ---
 
 #### Данные / схема
 
-**13. Event provenance** 💡  
+**15. Event provenance** 💡  
 Таблица `event_sources (event_id, source, won)`: из каких источников собрано событие и кто
 победил в merge. Сейчас merge молча оставляет победителя. Нужно, когда отладка качества данных
 станет узким местом.
 
-**14. candidate_sources → Source Registry** 💡  
+**16. candidate_sources → Source Registry** 💡  
 Таблица уже накапливает `score`/`sample_urls`/`listing_url`/`last_verified`/`status` и дрейфует
 в сторону реестра источников. Возможна будущая консолидация с `seeds.yaml`.
 
-**15. Очистка spurious `date='always'` от VK/TG** 📋  
-VK/Telegram-источники иногда возвращают `date='always'` для постов без конкретной даты.
-Текущая миграция `remove_always_from_events` убирает только `twogis-%`, остальные надо чистить вручную.
-Варианты автоматизации:
-- Расширить миграцию/триггер: `DELETE FROM events WHERE source ~ '^(vk|telegram)-' AND date='always'`
-- Или добавить постфильтр в `pipeline.py`: если `source` не `twogis-*` и `date='always'` → не писать
+**17. Очистка spurious `date='always'` от VK/TG** ✅ *(2026-06-26)*  
+Сделано — реализованы оба варианта сразу, см. строку «Фильтр spurious `always`» в разделе
+«Что реализовано»: правило в промпте + постфильтр `is_spurious_always` в петлях VK/TG + guard в
+`to_event_row` (последний рубеж для всех веток, включая generic), накопленное вычищено миграцией
+`…_remove_always_vk_tg.sql`. Площадкам (`bowling`/`billiards`/`karting`/`quest`) `always` оставлен.
 
 ---
 
