@@ -9,6 +9,8 @@ interface FilterBarProps {
   filters: Filters;
   onChange: (next: Filters) => void;
   availableTypes: readonly EventType[];
+  query: string;
+  onQueryChange: (value: string) => void;
 }
 
 const WHEN_OPTIONS: { value: WhenFilter; label: string }[] = [
@@ -18,7 +20,7 @@ const WHEN_OPTIONS: { value: WhenFilter; label: string }[] = [
   { value: "any", label: "Любая" },
 ];
 
-export function FilterBar({ filters, onChange, availableTypes }: FilterBarProps) {
+export function FilterBar({ filters, onChange, availableTypes, query, onQueryChange }: FilterBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreTypesOpen, setMoreTypesOpen] = useState(false);
 
@@ -45,19 +47,35 @@ export function FilterBar({ filters, onChange, availableTypes }: FilterBarProps)
     }`;
 
   return (
-    <div className="relative flex items-center gap-[14px] p-3 bg-surface border border-border rounded-2xl overflow-x-auto">
-      <div className="relative flex-none w-[240px]">
+    <div className="relative flex flex-col md:flex-row md:items-center gap-3 md:gap-[14px] p-3 bg-surface border border-border rounded-2xl md:overflow-x-auto">
+      <div className="relative w-full md:w-[240px] md:flex-none">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-[13px]">⌕</span>
         <input
           type="search"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onQueryChange("");
+          }}
           placeholder="Название, площадка, организатор…"
-          className="w-full bg-bg border border-border rounded-full text-[13px] text-ink pl-8 pr-3.5 py-2 focus:outline-none focus:border-accent"
+          aria-label="Поиск по афише"
+          className="w-full bg-bg border border-border rounded-full text-[13px] text-ink pl-8 pr-8 py-2 focus:outline-none focus:border-accent"
         />
+        {query && (
+          <button
+            type="button"
+            onClick={() => onQueryChange("")}
+            aria-label="Очистить поиск"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted text-[13px] hover:text-ink"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
-      <div className="w-px self-stretch bg-border flex-shrink-0" />
+      <div className="hidden md:block w-px self-stretch bg-border flex-shrink-0" />
 
-      <div className="flex gap-2 flex-none relative">
+      <div className="flex gap-2 flex-wrap md:flex-nowrap md:flex-none relative">
         {visibleTypes.map((t) => {
           const active = filters.types.has(t);
           return (
@@ -104,7 +122,7 @@ export function FilterBar({ filters, onChange, availableTypes }: FilterBarProps)
         )}
       </div>
 
-      <div className="w-px self-stretch bg-border flex-shrink-0" />
+      <div className="hidden md:block w-px self-stretch bg-border flex-shrink-0" />
 
       <div className="flex gap-[3px] bg-bg border border-border rounded-[10px] p-[3px] flex-none">
         {WHEN_OPTIONS.map((opt) => (
@@ -124,7 +142,7 @@ export function FilterBar({ filters, onChange, availableTypes }: FilterBarProps)
       <button
         type="button"
         onClick={() => setMoreOpen((v) => !v)}
-        className="ml-auto flex-none text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border border-border text-muted bg-bg whitespace-nowrap"
+        className="md:ml-auto flex-none self-start md:self-auto text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border border-border text-muted bg-bg whitespace-nowrap"
         aria-expanded={moreOpen}
       >
         Ещё фильтры {moreOpen ? "▴" : "▾"}
