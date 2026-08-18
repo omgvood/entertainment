@@ -26,7 +26,7 @@ export default async function PermPage() {
   return (
     <>
       <Header city="perm" />
-      <CityView events={events} cityTitle="Куда сходить в Перми" city="perm" today={today} />
+      <CityView events={events} city="perm" today={today} />
       {venues.length > 0 && (
         <VenuesSection
           venues={venues.slice(0, 8)}

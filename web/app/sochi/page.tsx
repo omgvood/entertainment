@@ -26,7 +26,7 @@ export default async function SochiPage() {
   return (
     <>
       <Header city="sochi" />
-      <CityView events={events} cityTitle="Куда сходить в Сочи" city="sochi" today={today} />
+      <CityView events={events} city="sochi" today={today} />
       {venues.length > 0 && (
         <VenuesSection
           venues={venues.slice(0, 8)}

@@ -5,20 +5,21 @@ import type { City, EventItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
 import { applyFilters, availableTypes, DEFAULT_FILTERS, type Filters } from "@/lib/filters";
 import { groupByDay } from "@/lib/dayGroups";
+import { addDaysUTC, formatDayMonth } from "@/lib/dateUtil";
 import { FilterBar } from "./FilterBar";
 import { EventCard } from "./EventCard";
 
 interface CityViewProps {
   events: EventItem[];
-  cityTitle: string;
   city: City;
   /** Календарная дата "сегодня" в таймзоне города — из getCityToday(city), см. page.tsx. */
   today: string;
 }
 
-export function CityView({ events, cityTitle, city, today }: CityViewProps) {
+export function CityView({ events, city, today }: CityViewProps) {
   const types = useMemo(() => availableTypes(events), [events]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const tomorrow = useMemo(() => addDaysUTC(today, 1), [today]);
 
   // Сегодня/Завтра не зависят от вкладки "Когда" — фильтруем только по типу/цене.
   const byTypeAndPrice = useMemo(
@@ -38,11 +39,14 @@ export function CityView({ events, cityTitle, city, today }: CityViewProps) {
   return (
     <div className="mx-auto max-w-[1440px] px-4 pt-6 pb-12 flex flex-col gap-8 flex-1 w-full">
       <div>
+        <p className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-accent-cyan mb-2">
+          Куда сходить сегодня
+        </p>
         <h1 className="text-[28px] sm:text-[40px] font-extrabold leading-tight tracking-tight mb-2">
-          {cityTitle}
+          {CITY_CONFIG[city].heroPrefix} <span className="text-accent">{CITY_CONFIG[city].label}</span> ждёт
         </h1>
         <p className="text-sm text-muted mb-5">
-          Найдено: <strong className="text-ink">{totalFound}</strong> {pluralEvents(totalFound)}
+          {totalFound} {pluralEvents(totalFound)} на ближайшие две недели
         </p>
         <FilterBar filters={filters} onChange={setFilters} availableTypes={types} />
       </div>
