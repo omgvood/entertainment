@@ -418,6 +418,9 @@ async def _cmd_run(args: argparse.Namespace) -> int:
         f"new={result.new}, extracted={result.extracted}, "
         f"failed={result.failed}, written={result.written}, "
         f"merged={result.merged}, near_misses={result.near_misses}"
+        f", fuzzy_merged={result.fuzzy_merged}"
+        f" (в т.ч. внутри источника {result.fuzzy_merged_in_source})"
+        f", fuzzy_candidates={result.fuzzy_candidates}"
     )
     if result.merged_by_source:
         print(f"  merge по источникам: {result.merged_by_source}")

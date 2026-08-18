@@ -52,7 +52,7 @@ async def test_warning_isolation_between_sources():
                new=AsyncMock(side_effect=fetch_side_effects)), \
          patch("parser.pipeline.to_event_row",
                return_value=MagicMock(id="perm-evt-1", source="source-2")), \
-         patch("parser.pipeline.fetch_events_by_ids", return_value=[]), \
+         patch("parser.pipeline.fetch_events_for_dedup", return_value=[]), \
          patch("parser.pipeline.merge_rows", return_value=empty_merge), \
          patch("parser.pipeline.upsert_events",
                return_value=types.SimpleNamespace(inserted=0)), \

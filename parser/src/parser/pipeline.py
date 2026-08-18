@@ -18,14 +18,16 @@ import structlog
 from supabase import Client
 
 from .classifiers import is_event_candidate
-from .config import CityConfig, SourceConfig
+from .config import DEDUP_MERGE_SCORE, CityConfig, SourceConfig
 from .db import (
     WriteStats,
+    cleanup_old_dedup_candidates,
     cleanup_old_events,
     cleanup_old_raw_documents,
-    fetch_events_by_ids,
+    fetch_events_for_dedup,
     get_raw_document_hash,
     record_coverage,
+    record_dedup_candidates,
     record_source_health,
     record_source_quality,
     save_raw_document,
@@ -36,7 +38,7 @@ from .db import (
 from .dedup import filter_new_urls
 from .discovery import DiscoveredUrl, ListingDiscovery, SitemapDiscovery
 from .extraction import ExtractorError, LLMExtractor, extract_jsonld_events
-from .merge import merge_rows
+from .merge import fuzzy_merge, merge_rows
 from .models import EventRow, EventType, ParsedEvent, Venue
 from .sources import KudaGoClient, PermMuseumClient, PermOperaClient, QuizPleaseClient, TelegramHtmlProvider, TimepadClient, TwoGisClient, VkClient
 from .sources import vk as vk_mod
@@ -176,6 +178,12 @@ class PipelineResult:
     merged: int = 0
     near_misses: int = 0
     merged_by_source: dict = field(default_factory=dict)
+    fuzzy_merged: int = 0
+    """Карточек не создано благодаря fuzzy-дедупу (слой 2)."""
+    fuzzy_merged_in_source: int = 0
+    """Из них дубли внутри одного источника — KPI unique_events_ratio их не учитывает."""
+    fuzzy_candidates: int = 0
+    """Пар в серой зоне: записаны в dedup_candidates, не слиты."""
     warnings: list[str] = field(default_factory=list)
     source_quality: dict[str, dict] = field(default_factory=dict)
 
@@ -293,16 +301,18 @@ async def run_city(
                     last_error=health_last_error,
                 )
 
-        # 4. Кросс-источниковый merge по id (= city+slug). Несколько источников с одинаковым
-        # title+date дают одинаковый id — схлопываем в победителя по priority, обогащая его
-        # пустые поля из проигравших. existing из БД участвуют, чтобы (а) сохранять данные
-        # прошлых прогонов и (б) не даунгрейдить карточку источником с меньшим priority.
+        # 4. Слой 1 — exact-merge по id (= city+slug): несколько источников с одинаковым
+        # title+date дают одинаковый id, схлопываем в победителя по priority.
+        # Пул из БД тянем сразу по датам прогона: слою 2 нужны и строки с ДРУГИМИ id.
+        dates = [r.date for r in all_rows]
         existing: list[EventRow] = []
         if not (dry_run or supabase is None):
-            existing = fetch_events_by_ids(supabase, [r.id for r in all_rows])
+            existing = fetch_events_for_dedup(supabase, city.slug, dates)
         extracted_by_source = Counter(r.source for r in all_rows)
-        merge = merge_rows(all_rows, existing, priorities)
-        all_rows = merge.rows_to_upsert
+        # Слою 1 отдаём только пересечение по id: иначе весь пул попадёт в rows_to_upsert
+        # и каждый прогон переписывал бы весь город.
+        incoming_ids = {r.id for r in all_rows}
+        merge = merge_rows(all_rows, [e for e in existing if e.id in incoming_ids], priorities)
         result.merged = merge.merged
         result.near_misses = merge.near_misses
         result.merged_by_source = merge.merged_by_source
@@ -315,6 +325,27 @@ async def run_city(
                 by_source=merge.merged_by_source,
             )
 
+        # 4b. Слой 2 — fuzzy: событие, уже записанное под другой формулировкой названия,
+        # не должно получить вторую карточку (write-time guard, удалений нет).
+        fuzzy = fuzzy_merge(merge.rows_to_upsert, existing, priorities)
+        all_rows = fuzzy.rows_to_upsert
+        result.fuzzy_merged = fuzzy.fuzzy_merged
+        result.fuzzy_merged_in_source = fuzzy.fuzzy_merged_in_source
+        result.fuzzy_candidates = len(fuzzy.candidates)
+        if fuzzy.candidates:
+            log.info(
+                "dedup.fuzzy",
+                merged=fuzzy.fuzzy_merged,
+                in_source=fuzzy.fuzzy_merged_in_source,
+                pairs=len(fuzzy.candidates),
+                largest_cluster=fuzzy.largest_cluster,
+            )
+        if fuzzy.largest_cluster > 3:
+            # Порог склеивает лишнее либо в городе реально идёт большой многочастный ивент.
+            result.warnings.append(
+                f"fuzzy-дедуп: кластер из {fuzzy.largest_cluster} карточек — проверь порог"
+            )
+
         # 5. Write. Слияние делит id, поэтому upsert по slug перезаписывает карточку на месте —
         # отдельных удалений не требуется.
         if dry_run or supabase is None:
@@ -325,6 +356,8 @@ async def run_city(
             cleanup_old_events(supabase, city.slug)
             cleanup_old_raw_documents(supabase)
             record_coverage(supabase, city.slug)
+            record_dedup_candidates(supabase, city.slug, fuzzy.candidates, DEDUP_MERGE_SCORE)
+            cleanup_old_dedup_candidates(supabase)
 
         # Качество источников считаем всегда (в т.ч. dry-run) — нужно для вывода в CLI.
         sq = _source_quality(extracted_by_source, merge.merged_by_source)
