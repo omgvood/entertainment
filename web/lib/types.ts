@@ -32,13 +32,14 @@ export type EventType =
 
 export type City = 'perm' | 'sochi';
 
-export const CITY_CONFIG: Record<City, { label: string; path: string; metaTitle: string; metaDescription: string; description: string }> = {
+export const CITY_CONFIG: Record<City, { label: string; path: string; metaTitle: string; metaDescription: string; description: string; heroPrefix: string }> = {
   perm: {
     label: 'Пермь',
     path: '/perm/',
     metaTitle: 'Афиша Пермь — куда сходить сегодня и на выходных',
     metaDescription: 'Афиша Перми: концерты, спектакли, выставки, квизы, стендапы, кино, боулинг и картинг. Расписание, цены, адреса.',
     description: 'Пермь — крупный культурный центр России. Ищете, куда сходить в Перми? Здесь собрана афиша города: концерты, спектакли, выставки, кино, лекции и экскурсии, а также квизы (QuizPlease, Мозгобойня), стендап-шоу, боулинг, бильярд и картинг — с актуальным расписанием, ценами и адресами.',
+    heroPrefix: 'Ночная',
   },
   sochi: {
     label: 'Сочи',
@@ -46,6 +47,7 @@ export const CITY_CONFIG: Record<City, { label: string; path: string; metaTitle:
     metaTitle: 'Афиша Сочи — куда сходить сегодня и на выходных',
     metaDescription: 'Афиша Сочи: концерты, спектакли, выставки, квизы, стендапы, кино, боулинг и картинг. Расписание, цены, адреса.',
     description: 'Сочи — курортная столица России на Чёрном море с активной культурной жизнью круглый год: концерты, спектакли, выставки, кино, экскурсии, а также квизы, стендап-вечера, боулинг и картинг. Если ищете, куда сходить в Сочи, — здесь полная афиша с ценами и адресами.',
+    heroPrefix: 'Ночной',
   },
 };
 
