@@ -1,22 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { City, EventItem } from "@/lib/types";
+import type { City, EventItem, VenueItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
 import { applyFilters, DEFAULT_FILTERS, typesByFrequency, type Filters } from "@/lib/filters";
 import { groupByDay } from "@/lib/dayGroups";
 import { addDaysUTC, formatDayMonth } from "@/lib/dateUtil";
 import { FilterBar } from "./FilterBar";
 import { EventCard } from "./EventCard";
+import { VenuesSection } from "./VenuesSection";
 
 interface CityViewProps {
   events: EventItem[];
+  /** Все площадки города: восемь идут в секцию «Постоянные места», остальные участвуют в поиске. */
+  venues: VenueItem[];
   city: City;
   /** Календарная дата "сегодня" в таймзоне города — из getCityToday(city), см. page.tsx. */
   today: string;
 }
 
-export function CityView({ events, city, today }: CityViewProps) {
+export function CityView({ events, venues, city, today }: CityViewProps) {
   const types = useMemo(() => typesByFrequency(events), [events]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const tomorrow = useMemo(() => addDaysUTC(today, 1), [today]);
@@ -59,6 +62,10 @@ export function CityView({ events, city, today }: CityViewProps) {
           <DaySection title="Завтра" date={tomorrow} events={groups.tomorrow} />
           <DaySection title="Дальше" events={later} />
         </>
+      )}
+
+      {venues.length > 0 && (
+        <VenuesSection venues={venues.slice(0, 8)} city={city} totalCount={venues.length} />
       )}
 
       <section className="pt-8 border-t border-border">
