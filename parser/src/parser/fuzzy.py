@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -31,6 +32,12 @@ _ENDINGS = frozenset("аеиоуыэюяьй")
 _MIN_CONTAINMENT_TOKENS = 2
 _MIN_CONTAINMENT_CHARS = 12
 
+# Кавычечный сегмент: внутренние кавычки в класс не входят, поэтому вложенные
+# «Яблочный Спас в «Хохловке»» дают один сегмент, а не два.
+_QUOTED = re.compile(r"«[^«»]*»|\"[^\"]*\"|“[^”]*”")
+# Между соседними сегментами перечня стоит только разделитель списка: «A», «B» / «A» и «B».
+_LIST_SEPARATOR = re.compile(r"[\s,;]*(?:и)?[\s,;]*")
+
 
 @dataclass(frozen=True)
 class PairScore:
@@ -41,6 +48,9 @@ class PairScore:
     venue_score: float
     reason: str
     """'ok' | 'time_mismatch' (жёсткий guard) | 'no_supporting_signals' (штраф 0.9)."""
+    score_without_containment: float = 0.0
+    """Тот же score, но без метрики вложенности — по нему кластеризация узнаёт рёбра,
+    которые держатся только на «короткий заголовок ⊂ длинный»."""
 
 
 def stem(word: str) -> str:
@@ -91,14 +101,39 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(union) if union else 0.0
 
 
-def text_score(a: str, b: str) -> float:
-    """Сходство двух текстов: максимум из трёх метрик — каждая ловит свой тип дубля."""
+def is_enumeration(title: str) -> bool:
+    """«Мастер-классы: «Единорог», «Планета», «Ёжик»» — перечень разных событий.
+
+    Признак — два кавычечных сегмента подряд, между которыми только запятая или «и».
+    Осмысленный текст между кавычками перечня не делает: «АРТ-парк»: Мастер-класс
+    «Цветы из бумаги» — это цикл и одно его занятие, обычный дубль.
+    """
+    spans = [m.span() for m in _QUOTED.finditer(title)]
+    return any(
+        _LIST_SEPARATOR.fullmatch(title[end:start])
+        for (_, end), (start, _) in zip(spans, spans[1:])
+    )
+
+
+def text_score(a: str, b: str, *, use_containment: bool = True) -> float:
+    """Сходство двух текстов: максимум из трёх метрик — каждая ловит свой тип дубля.
+
+    use_containment=False убирает вложенность из максимума: так кластеризация узнаёт,
+    держится ли пара только на ней.
+    """
     na, nb = _normalize(a), _normalize(b)
     if not na or not nb:
         return 0.0
     ta, tb = tokens(a), tokens(b)
-    shorter = na if len(na) <= len(nb) else nb
-    return max(_char_ratio(na, nb), _containment(ta, tb, shorter), _jaccard(ta, tb))
+    # Вложенность ищем по сырому длинному заголовку: _normalize срезает кавычки,
+    # а перечень опознаётся именно по ним.
+    shorter, longer = (na, b) if len(na) <= len(nb) else (nb, a)
+    containment = (
+        _containment(ta, tb, shorter)
+        if use_containment and not is_enumeration(longer)
+        else 0.0
+    )
+    return max(_char_ratio(na, nb), containment, _jaccard(ta, tb))
 
 
 def _venue_factor(venue_score: float) -> float:
@@ -122,20 +157,24 @@ def score_pair(a: EventRow, b: EventRow) -> PairScore:
         return PairScore(0.0, 0.0, 0.0, "time_mismatch")
 
     title = text_score(a.title, b.title)
+    title_plain = text_score(a.title, b.title, use_containment=False)
 
     # Пустая площадка хотя бы у одного — нейтрально: у VK/Telegram-постов venue_name
     # часто не извлекается, и штраф за это отсекал бы настоящие дубли.
     has_venues = bool(a.venue_name.strip()) and bool(b.venue_name.strip())
     venue = text_score(a.venue_name, b.venue_name) if has_venues else 0.0
-    score = title * (_venue_factor(venue) if has_venues else 1.0)
+    factor = _venue_factor(venue) if has_venues else 1.0
 
     # Ни площадки, ни времени не подтвердили совпадение — сливать по одному названию рискованно.
     reason = "ok"
     if not has_venues and not (a.time_start and b.time_start):
-        score *= 0.9
+        factor *= 0.9
         reason = "no_supporting_signals"
 
-    return PairScore(round(score, 3), round(title, 3), round(venue, 3), reason)
+    return PairScore(
+        round(title * factor, 3), round(title, 3), round(venue, 3), reason,
+        round(title_plain * factor, 3),
+    )
 
 
 @dataclass(frozen=True)
@@ -145,6 +184,49 @@ class ScoredPair:
     a: EventRow
     b: EventRow
     score: PairScore
+
+
+# Скобочное уточнение — часть одного названия, а не отдельное событие.
+_PARENTHESES = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
+
+
+def _drop_umbrella_edges(
+    edges: list[tuple[EventRow, EventRow, bool]], merge_threshold: float
+) -> list[tuple[EventRow, EventRow, bool]]:
+    """Убирает рёбра-вложенности у зонтичных заголовков.
+
+    «День Строгановых» вкладывается и в «…: книжная выставка», и в «…: показ фильма»,
+    а те друг на друга не похожи — значит это программа дня, а не три формулировки одного
+    анонса. Попарно такую вложенность от настоящего дубля («Культурная среда» ⊂ «Культурная
+    среда: бесплатный вход…») не отличить: решает только вид всего кластера.
+
+    Скобочные уточнения различием не считаем — «…(Воскресенье)» и «…(Спешилова 111/3)»
+    остаются одним событием, и их общий короткий заголовок зонтичным не делают.
+    """
+    linked = {frozenset((a.id, b.id)) for a, b, _ in edges}
+    children: dict[str, list[EventRow]] = {}
+    for a, b, weak in edges:
+        if weak:
+            children.setdefault(a.id, []).append(b)
+            children.setdefault(b.id, []).append(a)
+
+    hubs = {
+        row_id
+        for row_id, kids in children.items()
+        if any(
+            frozenset((x.id, y.id)) not in linked
+            and text_score(
+                _PARENTHESES.sub(" ", x.title), _PARENTHESES.sub(" ", y.title)
+            ) < merge_threshold
+            for i, x in enumerate(kids)
+            for y in kids[i + 1:]
+        )
+    }
+    return [
+        (a, b, weak)
+        for a, b, weak in edges
+        if not (weak and (a.id in hubs or b.id in hubs))
+    ]
 
 
 def cluster_events(
@@ -183,6 +265,7 @@ def cluster_events(
             parent[max(rx, ry)] = min(rx, ry)
 
     pairs: list[ScoredPair] = []
+    edges: list[tuple[EventRow, EventRow, bool]] = []
     for block in blocks.values():
         ordered = sorted(block, key=lambda r: r.id)  # детерминированный порядок сравнений
         for i, a in enumerate(ordered):
@@ -191,7 +274,11 @@ def cluster_events(
                 if ps.score >= report_threshold:
                     pairs.append(ScoredPair(a, b, ps))
                 if ps.score >= merge_threshold:
-                    union(a.id, b.id)
+                    # Слабое ребро — то, что без вложенности порога бы не набрало.
+                    edges.append((a, b, ps.score_without_containment < merge_threshold))
+
+    for a, b, _weak in _drop_umbrella_edges(edges, merge_threshold):
+        union(a.id, b.id)
 
     grouped: dict[str, list[EventRow]] = {}
     for block in blocks.values():

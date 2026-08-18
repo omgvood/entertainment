@@ -118,6 +118,35 @@ def test_score_pair_unrelated_events_score_low():
     assert score_pair(a, b).score < CANDIDATE
 
 
+def test_text_score_enumeration_is_not_a_duplicate():
+    """Афиша-перечень трёх разных МК, а не переформулировка одного анонса."""
+    assert text_score(
+        "Мастер-класс «Единорог»", "Мастер-классы: «Единорог», «Планета», «Ёжик»"
+    ) < MERGE
+
+
+def test_text_score_enumeration_does_not_swallow_its_header():
+    """«Анимационная программа» — отдельное событие, а не заголовок перечня."""
+    assert text_score(
+        "Анимационная программа",
+        "Анимационная программа и мастер-классы: «Арт-терапия», «Подсолнухи»",
+    ) < MERGE
+
+
+def test_text_score_program_prefix_is_not_enumeration():
+    """Тоже две пары кавычек, но список не образуют: «АРТ-парк» — цикл, а не соседний МК."""
+    assert text_score(
+        "«АРТ-парк»: Мастер-класс «Цветы из бумаги»", "Цветы из бумаги"
+    ) >= MERGE
+
+
+def test_text_score_nested_quotes_are_one_segment():
+    """Вложенные кавычки — один сегмент: «Яблочный Спас в «Хохловке»» не перечень."""
+    assert text_score(
+        "Праздник «Яблочный Спас в «Хохловке»", "Яблочный Спас в «Хохловке»"
+    ) >= MERGE
+
+
 from parser.fuzzy import cluster_events
 
 
@@ -161,6 +190,39 @@ def test_cluster_skips_always():
     a = _row("Боулинг-клуб Страйк", "Страйк", date="always", source="twogis-bowling")
     b = _row("Боулинг клуб Страйк", "Страйк", date="always", source="twogis-bowling")
     assert _clusters_of([a, b]) == []
+
+
+def test_cluster_umbrella_program_keeps_its_parts():
+    """«День Строгановых» — программа дня: её пункты не дубли ни ей, ни друг другу.
+
+    Попарно «X» ⊂ «X: подсобытие» неотличимо от настоящего дубля, поэтому решает
+    кластер: у зонтичного заголовка несколько детей, не похожих между собой.
+    """
+    day = _row("День Строгановых", "Пермская галерея", "12:00")
+    book = _row("День Строгановых: книжная выставка", "Пермская галерея")
+    film = _row("День Строгановых: показ фильма", "Пермская галерея")
+    assert [len(c) for c in _clusters_of([day, book, film])] == [1, 1, 1]
+
+
+def test_cluster_single_longer_variant_still_merges():
+    """Один ребёнок — это уточнение, а не программа: слияние остаётся."""
+    a = _row("Культурная среда", "ПЕРММ", "18:00")
+    b = _row("Культурная среда: бесплатный вход для льготных категорий", "ПЕРММ", "18:00")
+    assert len(_clusters_of([a, b])[0]) == 2
+
+
+def test_cluster_similar_variants_are_not_an_umbrella():
+    """Четыре формулировки одной экскурсии ПЕРММ: дети похожи между собой — не программа."""
+    rows = [
+        _row(t, "Музей современного искусства «ПЕРММ»", "18:30")
+        for t in (
+            "Обзорная экскурсия по текущим выставкам",
+            "Обзорная экскурсия по текущим выставкам музея",
+            "Обзорная экскурсия по текущим выставкам музея «ПЕРММ»",
+            "Обзорные экскурсии по текущим выставкам музея «ПЕРММ»",
+        )
+    ]
+    assert len(_clusters_of(rows)[0]) == 4
 
 
 def test_cluster_reports_grey_zone_pairs():
