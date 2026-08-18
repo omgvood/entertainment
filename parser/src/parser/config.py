@@ -31,6 +31,14 @@ SOCIAL_SOURCE_PREFIXES: tuple[str, ...] = ("vk-", "telegram-", "generic")
 # Например, generic-домен боулинг-клуба с расписанием «работаем ежедневно».
 ALLOWED_ALWAYS_EVENT_TYPES: frozenset[str] = frozenset({"bowling", "billiards", "karting", "quest"})
 
+# Пороги fuzzy-дедупа (слой 2, см. fuzzy.py). Калибровка, не конфигурация деплоя,
+# поэтому константы модуля, а не переменные окружения.
+DEDUP_MERGE_SCORE: float = 0.95
+"""score >= порога — карточки считаются одним событием и схлопываются автоматически."""
+DEDUP_CANDIDATE_SCORE: float = 0.75
+"""score в [DEDUP_CANDIDATE_SCORE, DEDUP_MERGE_SCORE) — пара пишется в dedup_candidates
+без слияния: материал для калибровки порогов и для команды dedup-backfill."""
+
 
 @dataclass(frozen=True)
 class Settings:
