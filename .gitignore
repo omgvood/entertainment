@@ -24,7 +24,8 @@ Thumbs.db
 
 # Локальные данные и черновики (не для репозитория)
 input-output/
-docs/
+docs/*
+!docs/superpowers/
 
 # Отладочные скрипты и дампы HTML (локальная диагностика парсера)
 #debug_parse_2gis.py
