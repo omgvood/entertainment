@@ -6,6 +6,7 @@
 
 import type { EventItem, EventType } from "./types";
 import { addDaysUTC } from "./dateUtil";
+import { priceKind } from "./price";
 
 export type WhenFilter = "today" | "tomorrow" | "weekend" | "any";
 
@@ -102,9 +103,14 @@ export function applyFilters(events: EventItem[], filters: Filters, today: strin
       if (filters.when === "weekend" && !weekend!.has(event.date)) return false;
     }
 
-    // 3. Цена — пересечение диапазонов
-    if (event.priceMax < filters.priceMin) return false;
-    if (event.priceMin > filters.priceMax) return false;
+    // 3. Цена — пересечение диапазонов.
+    // Событие с неизвестной ценой («по билетам», «Уточняйте») предикат
+    // пропускает: в БД такая цена неотличима от нуля, и прятать карточку
+    // из-за пробела в данных хуже, чем показать её. Подробнее — lib/price.ts.
+    if (priceKind(event) !== "unknown") {
+      if (event.priceMax < filters.priceMin) return false;
+      if (event.priceMin > filters.priceMax) return false;
+    }
 
     return true;
   });
