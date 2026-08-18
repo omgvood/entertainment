@@ -55,8 +55,8 @@ export function CityView({ events, city, today }: CityViewProps) {
         <EmptyState onReset={() => setFilters(DEFAULT_FILTERS)} />
       ) : (
         <>
-          <DaySection title="Сегодня" events={groups.today} />
-          <DaySection title="Завтра" events={groups.tomorrow} />
+          <DaySection title="Сегодня" date={today} events={groups.today} />
+          <DaySection title="Завтра" date={tomorrow} events={groups.tomorrow} />
           <DaySection title="Дальше" events={later} />
         </>
       )}
@@ -73,13 +73,22 @@ export function CityView({ events, city, today }: CityViewProps) {
   );
 }
 
-function DaySection({ title, events }: { title: string; events: EventItem[] }) {
+function DaySection({
+  title,
+  date,
+  events,
+}: {
+  title: string;
+  date?: string;
+  events: EventItem[];
+}) {
   if (events.length === 0) return null;
 
   return (
     <section>
       <div className="flex items-baseline gap-3 mb-[18px]">
         <h2 className="text-[19px] font-extrabold m-0">{title}</h2>
+        {date && <span className="text-[13px] text-muted">{formatDayMonth(date)}</span>}
         <span className="ml-auto text-[11.5px] font-bold px-2.5 py-[3px] rounded-full text-accent-cyan bg-[color:var(--color-accent-cyan)]/[0.12] border border-[color:var(--color-accent-cyan)]/30">
           {events.length} {pluralEvents(events.length)}
         </span>
