@@ -3,26 +3,11 @@ import type { EventItem } from "@/lib/types";
 import { EVENT_TYPE_LABELS } from "@/lib/types";
 import { eventBadgeStyle, eventPlaceholder } from "@/lib/event-styles";
 import { CardImage } from "./CardImage";
-
-const MONTHS_RU = [
-  "января",
-  "февраля",
-  "марта",
-  "апреля",
-  "мая",
-  "июня",
-  "июля",
-  "августа",
-  "сентября",
-  "октября",
-  "ноября",
-  "декабря",
-];
+import { formatDayMonth } from "@/lib/dateUtil";
 
 function formatDate(event: EventItem): string {
   if (event.date === "always") return "ежедневно";
-  const [, m, d] = event.date.split("-").map(Number);
-  const day = `${d} ${MONTHS_RU[m - 1]}`;
+  const day = formatDayMonth(event.date);
   return event.timeStart ? `${day}, ${event.timeStart}` : day;
 }
 
@@ -52,6 +37,27 @@ export function EventCard({ event }: { event: EventItem }) {
         <h2 className="text-[16px] font-bold leading-tight line-clamp-2">
           {event.title}
         </h2>
+
+        <p className="text-[13px] text-muted font-semibold">{event.venueName}</p>
+
+        {event.description && (
+          <p className="line-clamp-2 text-[12.5px] text-muted/80 leading-relaxed">
+            {event.description}
+          </p>
+        )}
+
+        {event.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {event.tags.slice(0, 2).map((tag) => (
+              <span
+                key={tag}
+                className="text-[10.5px] text-muted bg-bg border border-border px-[9px] py-[3px] rounded-full"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-col gap-1 text-[12.5px] text-muted mt-auto">
           <span>📅 {formatDate(event)}</span>
