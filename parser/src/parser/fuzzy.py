@@ -136,3 +136,68 @@ def score_pair(a: EventRow, b: EventRow) -> PairScore:
         reason = "no_supporting_signals"
 
     return PairScore(round(score, 3), round(title, 3), round(venue, 3), reason)
+
+
+@dataclass(frozen=True)
+class ScoredPair:
+    """Посчитанная пара — для записи в dedup_candidates и для вывода dedup-backfill."""
+
+    a: EventRow
+    b: EventRow
+    score: PairScore
+
+
+def cluster_events(
+    rows: list[EventRow],
+    *,
+    merge_threshold: float,
+    report_threshold: float,
+) -> tuple[list[list[EventRow]], list[ScoredPair]]:
+    """Группирует строки в кластеры-дубли: ребро при score >= merge_threshold,
+    кластер = компонента связности.
+
+    Попарного слияния мало: «День рождения парка Горького» приходит четырьмя
+    формулировками, и при A~B, B~C, A≁C нужен один кластер, а не два пересекающихся.
+
+    Возвращает (кластеры, пары): кластеры включают одиночек; пары — всё, что набрало
+    >= report_threshold (включая слитые — они нужны как аудит auto-merge).
+    """
+    blocks: dict[tuple[str, str], list[EventRow]] = {}
+    for r in rows:
+        if r.date == "always":  # площадки живут в venues, матчинг по названию им не нужен
+            continue
+        blocks.setdefault((r.city, r.date), []).append(r)
+
+    parent: dict[str, str] = {r.id: r.id for block in blocks.values() for r in block}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]  # сжатие пути
+            x = parent[x]
+        return x
+
+    def union(x: str, y: str) -> None:
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            # Корень — лексикографически меньший id: результат не зависит от порядка обхода.
+            parent[max(rx, ry)] = min(rx, ry)
+
+    pairs: list[ScoredPair] = []
+    for block in blocks.values():
+        ordered = sorted(block, key=lambda r: r.id)  # детерминированный порядок сравнений
+        for i, a in enumerate(ordered):
+            for b in ordered[i + 1 :]:
+                ps = score_pair(a, b)
+                if ps.score >= report_threshold:
+                    pairs.append(ScoredPair(a, b, ps))
+                if ps.score >= merge_threshold:
+                    union(a.id, b.id)
+
+    grouped: dict[str, list[EventRow]] = {}
+    for block in blocks.values():
+        for r in block:
+            grouped.setdefault(find(r.id), []).append(r)
+
+    clusters = [sorted(members, key=lambda r: r.id) for members in grouped.values()]
+    clusters.sort(key=lambda c: c[0].id)
+    return clusters, pairs
