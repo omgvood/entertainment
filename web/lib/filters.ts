@@ -49,6 +49,21 @@ export function availableTypes(events: EventItem[]): EventType[] {
   return ALL_TYPES.filter((t) => events.some((e) => e.type === t));
 }
 
+/**
+ * Типы, реально присутствующие в событиях города, отсортированные по убыванию
+ * частоты (число событий этого типа). При равном count — порядок ALL_TYPES
+ * (availableTypes уже возвращает типы в порядке ALL_TYPES, поэтому стабильная
+ * сортировка Array.prototype.sort по count сохраняет этот tie-break бесплатно).
+ */
+export function typesByFrequency(events: EventItem[]): EventType[] {
+  const types = availableTypes(events);
+  const counts = new Map<EventType, number>();
+  for (const t of types) {
+    counts.set(t, events.filter((e) => e.type === t).length);
+  }
+  return [...types].sort((a, b) => counts.get(b)! - counts.get(a)!);
+}
+
 export const DEFAULT_FILTERS: Filters = {
   types: new Set(ALL_TYPES),
   when: "any",
