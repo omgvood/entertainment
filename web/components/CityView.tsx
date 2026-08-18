@@ -22,6 +22,7 @@ interface CityViewProps {
 export function CityView({ events, venues, city, today }: CityViewProps) {
   const types = useMemo(() => typesByFrequency(events), [events]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [query, setQuery] = useState("");
   const tomorrow = useMemo(() => addDaysUTC(today, 1), [today]);
 
   // Сегодня/Завтра не зависят от вкладки "Когда" — фильтруем только по типу/цене.
@@ -51,7 +52,13 @@ export function CityView({ events, venues, city, today }: CityViewProps) {
         <p className="text-sm text-muted mb-5">
           {totalFound} {pluralEvents(totalFound)} на ближайшие две недели
         </p>
-        <FilterBar filters={filters} onChange={setFilters} availableTypes={types} />
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          availableTypes={types}
+          query={query}
+          onQueryChange={setQuery}
+        />
       </div>
 
       {totalFound === 0 ? (
