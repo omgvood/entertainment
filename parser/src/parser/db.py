@@ -185,23 +185,26 @@ def bootstrap_venues_if_empty(client: Client, city: str) -> WriteStats | None:
     return vstats
 
 
-def fetch_events_by_ids(client: Client, ids: list[str]) -> list[EventRow]:
-    """Существующие события с указанными id (для кросс-источникового merge).
+def fetch_events_for_dedup(client: Client, city: str, dates: list[str]) -> list[EventRow]:
+    """События города на указанные даты — пул для дедупа (слои 1 и 2).
 
-    id = city+slug, поэтому уже включает город. Возвращает распарсенные EventRow.
+    Надмножество выборки по id: fuzzy-кандидат по определению имеет ДРУГОЙ id, поэтому
+    искать по id нельзя. 'always' исключаем — постоянные места живут в venues.
     """
-    if not ids:
+    if not dates:
         return []
     rows: list[EventRow] = []
-    unique = list({i for i in ids if i})
-    for i in range(0, len(unique), 100):
-        chunk = unique[i : i + 100]
-        resp = client.table("events").select("*").in_("id", chunk).execute()
+    unique = sorted({d for d in dates if d and d != "always"})
+    for i in range(0, len(unique), 50):
+        chunk = unique[i : i + 50]
+        resp = (
+            client.table("events").select("*").eq("city", city).in_("date", chunk).execute()
+        )
         for r in resp.data or []:
             try:
                 rows.append(EventRow(**r))
             except Exception as exc:  # noqa: BLE001 — битую строку из БД просто пропускаем
-                log.warning("db.fetch_ids.row_invalid", id=r.get("id"), error=str(exc))
+                log.warning("db.fetch_dedup.row_invalid", id=r.get("id"), error=str(exc))
     return rows
 
 
@@ -430,3 +433,75 @@ def record_coverage(client: Client, city: str) -> None:
             log.info("db.coverage.ok", city=city, categories=len(payload))
     except Exception as exc:  # noqa: BLE001
         log.warning("db.coverage.failed", city=city, error=str(exc))
+
+
+# --- dedup_candidates (Analytics): пары похожих событий (аудит + калибровка порогов) ---
+
+def record_dedup_candidates(client: Client, city: str, pairs: list, merge_threshold: float) -> None:
+    """Апсертит найденные пары. Не роняет прогон при ошибке — это аналитика, не данные сайта.
+
+    first_seen_at и resolution в payload не входят: при повторной встрече пары они
+    должны пережить апсерт (ON CONFLICT перезаписывает только переданные колонки).
+    """
+    if not pairs:
+        return
+    try:
+        now = _utcnow()
+        payload = []
+        for p in pairs:
+            # Порядок в паре детерминирован, иначе UNIQUE(a,b) пропустит зеркальный дубль.
+            a, b = (p.a, p.b) if p.a.id <= p.b.id else (p.b, p.a)
+            payload.append({
+                "city": city,
+                "event_date": a.date,
+                "event_id_a": a.id, "event_id_b": b.id,
+                "title_a": a.title, "title_b": b.title,
+                "source_a": a.source, "source_b": b.source,
+                "venue_a": a.venue_name, "venue_b": b.venue_name,
+                "time_a": a.time_start, "time_b": b.time_start,
+                "score": p.score.score,
+                "title_score": p.score.title_score,
+                "venue_score": p.score.venue_score,
+                "reason": p.score.reason,
+                "decision": "auto_merge" if p.score.score >= merge_threshold else "candidate",
+                "last_seen_at": now,
+            })
+        client.table("dedup_candidates").upsert(
+            payload, on_conflict="event_id_a,event_id_b"
+        ).execute()
+        log.info("db.dedup_candidates.ok", city=city, pairs=len(payload))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("db.dedup_candidates.failed", city=city, error=str(exc))
+
+
+def cleanup_old_dedup_candidates(client: Client, days_to_keep: int = 1) -> int:
+    """TTL: пары на прошедшие даты не нужны (сами события уже удалены cleanup_old_events)."""
+    cutoff = (date.today() - timedelta(days=days_to_keep)).isoformat()
+    try:
+        resp = (
+            client.table("dedup_candidates").delete().lt("event_date", cutoff).execute()
+        )
+        deleted = len(resp.data or [])
+        if deleted:
+            log.info("db.dedup_candidates.cleanup", deleted=deleted, cutoff=cutoff)
+        return deleted
+    except Exception as exc:  # noqa: BLE001
+        log.warning("db.dedup_candidates.cleanup_failed", error=str(exc))
+        return 0
+
+
+def delete_events_by_ids(client: Client, ids: list[str]) -> int:
+    """Удаляет события по списку id. Только для разовой команды dedup-backfill.
+
+    В ежедневном пайплайне удалений нет намеренно: карточка = публичный URL, и её
+    исчезновение — решение человека, а не автоматики.
+    """
+    if not ids:
+        return 0
+    deleted = 0
+    for i in range(0, len(ids), 100):
+        chunk = ids[i : i + 100]
+        resp = client.table("events").delete().in_("id", chunk).execute()
+        deleted += len(resp.data or [])
+    log.info("db.events.deleted", count=deleted)
+    return deleted

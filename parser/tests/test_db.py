@@ -103,3 +103,64 @@ def test_event_row_to_venue_source_override():
     v = event_row_to_venue(row, source="manual")
     assert v.source == "manual"
     assert v.address is None  # row.get отсутствующих полей → None
+
+
+# --- dedup_candidates ---
+
+from parser.db import fetch_events_for_dedup, record_dedup_candidates
+from parser.fuzzy import PairScore, ScoredPair
+from parser.models import ParsedEvent
+from parser.validator import to_event_row
+
+
+def _event(title: str, source: str = "vk-posts"):
+    p = ParsedEvent(
+        title=title, type="other", date="2026-08-16", time_start="14:00",
+        price_min=0, price_max=0, price_text="уточняйте",
+        address="ул. Тест, 1", venue_name="Сквер",
+    )
+    return to_event_row(p, "perm", "http://u", source)
+
+
+def test_fetch_events_for_dedup_queries_unique_real_dates():
+    """'always' и повторы отбрасываются: площадки не матчим, лишних запросов не делаем."""
+    client = MagicMock()
+    chain = client.table.return_value.select.return_value
+    chain.eq.return_value = chain
+    chain.in_.return_value = chain
+    chain.execute.return_value = MagicMock(data=[])
+    fetch_events_for_dedup(client, "perm", ["2026-08-16", "2026-08-16", "always"])
+    assert chain.in_.call_args.args == ("date", ["2026-08-16"])
+
+
+def test_fetch_events_for_dedup_without_real_dates_makes_no_query():
+    client = MagicMock()
+    assert fetch_events_for_dedup(client, "perm", ["always"]) == []
+    client.table.assert_not_called()
+
+
+def test_record_dedup_candidates_orders_pair_ids():
+    """event_id_a — лексикографически меньший: иначе UNIQUE(a,b) пропустит зеркальную пару."""
+    client = MagicMock()
+    a = _event("Ярмарка")           # perm-yarmarka-2026-08-16
+    b = _event("Акция Обнимака")    # perm-aktsiya-obnimaka-2026-08-16 — лексикографически меньше
+    record_dedup_candidates(client, "perm", [ScoredPair(a, b, PairScore(0.97, 1.0, 1.0, "ok"))], 0.95)
+    payload = client.table.return_value.upsert.call_args.args[0]
+    assert payload[0]["event_id_a"] == b.id
+    assert payload[0]["event_id_b"] == a.id
+    assert payload[0]["decision"] == "auto_merge"
+
+
+def test_record_dedup_candidates_marks_grey_zone():
+    """score ниже порога слияния → строка помечается candidate, а не auto_merge."""
+    client = MagicMock()
+    pair = ScoredPair(_event("Ярмарка"), _event("Акция Обнимака"), PairScore(0.80, 0.8, 1.0, "ok"))
+    record_dedup_candidates(client, "perm", [pair], 0.95)
+    payload = client.table.return_value.upsert.call_args.args[0]
+    assert payload[0]["decision"] == "candidate"
+
+
+def test_record_dedup_candidates_no_pairs_no_query():
+    client = MagicMock()
+    record_dedup_candidates(client, "perm", [], 0.95)
+    client.table.assert_not_called()
