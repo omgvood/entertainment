@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { City, EventItem, VenueItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
 import { applyFilters, DEFAULT_FILTERS, typesByFrequency, type Filters } from "@/lib/filters";
@@ -26,6 +26,33 @@ export function CityView({ events, venues, city, today }: CityViewProps) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
   const tomorrow = useMemo(() => addDaysUTC(today, 1), [today]);
+
+  // Статический HTML один на все query-строки, поэтому ?q= читается только
+  // на клиенте. useSearchParams() из next/navigation не годится: он требует
+  // <Suspense> и уводит страницу из чистого SSG.
+  const [urlRead, setUrlRead] = useState(false);
+
+  useEffect(() => {
+    const initial = new URLSearchParams(window.location.search).get("q");
+    // Единоразовое чтение ?q= сразу после монтирования, не подписка на внешний
+    // источник — предупреждение react-hooks/set-state-in-effect здесь не о чем.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (initial) setQuery(initial);
+    setUrlRead(true);
+  }, []);
+
+  useEffect(() => {
+    if (!urlRead) return; // не затирать ?q= до того, как он прочитан
+    const id = setTimeout(() => {
+      const url = new URL(window.location.href);
+      const trimmed = query.trim();
+      if (trimmed) url.searchParams.set("q", trimmed);
+      else url.searchParams.delete("q");
+      // replaceState, а не pushState: иначе «Назад» отматывает запрос по буквам.
+      window.history.replaceState(null, "", url);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [query, urlRead]);
 
   // Сегодня/Завтра не зависят от вкладки "Когда" — фильтруем только по типу/цене.
   const byTypeAndPrice = useMemo(
