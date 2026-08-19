@@ -341,7 +341,9 @@ async def run_city(
                 pairs=len(fuzzy.candidates),
                 largest_cluster=fuzzy.largest_cluster,
             )
-        if fuzzy.largest_cluster > 3:
+        # Порог 4, а не 3: после guard'ов на перечни и зонтики (см. fuzzy.py) кластер из
+        # четырёх формулировок одной экскурсии ПЕРММ — норма, а не сигнал сбоя.
+        if fuzzy.largest_cluster > 4:
             # Порог склеивает лишнее либо в городе реально идёт большой многочастный ивент.
             result.warnings.append(
                 f"fuzzy-дедуп: кластер из {fuzzy.largest_cluster} карточек — проверь порог"
