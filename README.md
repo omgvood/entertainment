@@ -347,6 +347,7 @@ entertainment/
 - `extraction_mode` — `per_url` / `batch_listing` / `playwright_listing` / `direct_api` / `vk_events` / `vk_posts` / `telegram_posts` / `generic`
 - `priority` — приоритет источника при кросс-источниковом merge (выше — побеждает), дефолт `0`
 - `full_snapshot` — `true` если один вызов гарантированно возвращает **все** будущие события источника. Включает `sync_source_events` — автоудаление отменённых событий. Устанавливать только при уверенности в полноте: для `batch_listing` с пагинацией/lazy-loading и для `vk_posts`/`telegram_posts`/`generic` — **не устанавливать**
+- `distinct_events` — `true`, если одна строка источника всегда одно событие (у каждой игры QuizPlease свой id). Запрещает fuzzy-слою сливать две строки этого источника между собой. Не путать с `full_snapshot` (полнота среза для синхронизации отмен): `permm` — `full_snapshot`, но не `distinct_events`, потому что склеивает два JSON-эндпоинта и один экспонат приходит дважды
 - Для `per_url`/`batch_listing`: `kind` (listing/sitemap), `url`, `url_pattern` (regex)
 - Для `direct_api`: `provider` (`quizplease` / `twogis` / `timepad` / `kudago` / `permm` / `permopera`). `quizplease` требует `quizplease_city_id` (ID города в API, hardcoded в seeds); `twogis` — `api_query` + `event_type`; `timepad`/`kudago` тип определяют сами по категории; `permm`/`permopera` требуют `event_type` + `venue_name` (адрес/площадка в JSON отсутствуют — берутся из seeds), опц. `address`
 - Для `vk_events`: опц. `vk_city_id` (ID города VK для `groups.search`). Для `vk_posts`: `vk_groups` — список screen-name'ов кураторских сообществ
@@ -691,6 +692,12 @@ LLM-экстракторы получают список разрешённых 
   Площадка не помогает совпадению, только может навредить (штраф при явном несовпадении,
   нейтрально при пустой). Без единого подтверждающего сигнала (ни площадки, ни времени) —
   штраф `×0.9`.
+  Второй жёсткий guard — `distinct_sources`: две строки источника, помеченного в seeds
+  `distinct_events: true`, не сливаются никогда. QuizPlease отдаёт по строке на игру
+  (свой `game_id`), и «Квиз, плиз! PERM» с «Квиз, плиз! [новички] PERM» в одном зале
+  в 19:30 — две разные игры; текстом их не отличить (`«Фотография как искусство»` vs
+  `«…» (12+)` в тех же данных — настоящий дубль). Флаг опт-ин и **не** равен
+  `full_snapshot`: `permm` полон, но читает два эндпоинта, и его самодубли настоящие.
 - `cluster_events(rows, merge_threshold, report_threshold)` — блокировка по `city+date`
   (`always` не участвует — площадки живут в `venues`), рёбра при `score >= merge_threshold`,
   кластеры — компоненты связности через union-find (нужна транзитивность: «День рождения
@@ -2080,7 +2087,7 @@ Postgres TOAST (колонка `text`), TTL — 90–180 дней.
 | `event_id_a` / `event_id_b` | text | Пара `id`; `a` всегда лексикографически меньше `b` (иначе `UNIQUE(a,b)` пропустит зеркальный дубль) |
 | `title_a` / `title_b`, `source_a` / `source_b`, `venue_a` / `venue_b`, `time_a` / `time_b` | text | Снимок полей пары на момент сравнения (для чтения без джойна в `events`) |
 | `score` / `title_score` / `venue_score` | numeric(4,3) | Итог и разбивка по сигналам скорера |
-| `reason` | text | `ok` / `time_mismatch` (жёсткий guard) / `no_supporting_signals` (штраф `×0.9`) |
+| `reason` | text | `ok` / `time_mismatch`, `same_distinct_source` (жёсткие guard'ы) / `no_supporting_signals` (штраф `×0.9`) |
 | `decision` | text | `auto_merge` (схлопнули) / `candidate` (оставили врозь, серая зона) |
 | `resolution` / `resolved_at` / `resolved_by` | text / timestamptz / text | Зарезервированы под будущего разрешателя серой зоны (LLM или человек) — сейчас всегда `NULL` |
 | `first_seen_at` / `last_seen_at` | timestamptz | Первая и последняя встреча пары (TTL по `event_date`, как у событий) |
