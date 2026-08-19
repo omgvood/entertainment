@@ -398,6 +398,9 @@ def _cmd_dedup_backfill(args: argparse.Namespace) -> int:
         print(f"Город {args.city!r} не описан в seeds.yaml", file=sys.stderr)
         return 1
     priorities = {s.name: s.priority for s in cities[args.city].sources}
+    distinct_sources = frozenset(
+        s.name for s in cities[args.city].sources if s.distinct_events
+    )
 
     today = date.today().isoformat()
     resp = (
@@ -411,7 +414,10 @@ def _cmd_dedup_backfill(args: argparse.Namespace) -> int:
     dates = sorted({r["date"] for r in resp.data or []})
     rows = fetch_events_for_dedup(supabase, args.city, dates)
     clusters, _pairs = cluster_events(
-        rows, merge_threshold=args.threshold, report_threshold=args.threshold
+        rows,
+        merge_threshold=args.threshold,
+        report_threshold=args.threshold,
+        distinct_sources=distinct_sources,
     )
 
     to_delete: list[str] = []

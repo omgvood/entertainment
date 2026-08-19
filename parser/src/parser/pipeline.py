@@ -222,6 +222,7 @@ async def run_city(
     result = PipelineResult()
     provider_keys = {"twogis": twogis_api_key, "timepad": timepad_token}
     priorities = {s.name: s.priority for s in city.sources}
+    distinct_sources = frozenset(s.name for s in city.sources if s.distinct_events)
 
     async with httpx.AsyncClient(
         headers={"User-Agent": "EventsBot/1.0 (pet-project)"}
@@ -327,7 +328,7 @@ async def run_city(
 
         # 4b. Слой 2 — fuzzy: событие, уже записанное под другой формулировкой названия,
         # не должно получить вторую карточку (write-time guard, удалений нет).
-        fuzzy = fuzzy_merge(merge.rows_to_upsert, existing, priorities)
+        fuzzy = fuzzy_merge(merge.rows_to_upsert, existing, priorities, distinct_sources)
         all_rows = fuzzy.rows_to_upsert
         result.fuzzy_merged = fuzzy.fuzzy_merged
         result.fuzzy_merged_in_source = fuzzy.fuzzy_merged_in_source

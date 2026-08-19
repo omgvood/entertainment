@@ -170,3 +170,14 @@ def test_fuzzy_db_pool_row_not_written_when_untouched():
     unrelated = _row("Старая лекция", "2026-08-16", "Музей", "vk-posts", time_start="12:00")
     res = fuzzy_merge([fresh], [unrelated], _PRI)
     assert [r.id for r in res.rows_to_upsert] == [fresh.id]
+
+
+def test_fuzzy_distinct_source_rows_are_both_written():
+    """Две игры QuizPlease в одном зале в одно время должны попасть в БД обе."""
+    a = _row("Квиз, плиз! PERM", "2026-08-18", "Ресторан Кама", "quizplease",
+             time_start="19:30")
+    b = _row("Квиз, плиз! [новички] PERM", "2026-08-18", "Ресторан Кама", "quizplease",
+             time_start="19:30")
+    res = fuzzy_merge([a, b], [], _PRI, frozenset({"quizplease"}))
+    assert len(res.rows_to_upsert) == 2
+    assert res.fuzzy_merged == 0

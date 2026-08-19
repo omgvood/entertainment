@@ -202,6 +202,12 @@ class SourceConfig:
     # True = один вызов возвращает ВСЕ будущие события источника для города.
     # Включает автоматическое удаление событий, пропавших из источника (синхронизация отмен).
     # НЕ включать для batch_listing с пагинацией/lazy-loading, vk_posts, telegram, generic.
+    distinct_events: bool = False
+    # True = одна строка источника всегда одно событие (у каждой игры QuizPlease свой id
+    # в API). Тогда fuzzy-дедуп не сливает две строки этого источника между собой, как бы
+    # ни были похожи названия. НЕ ставить источникам, которые склеивают несколько
+    # эндпоинтов: permm читает /json/events и /json/exhibitions, один экспонат приходит
+    # оттуда дважды — там самодубли настоящие и должны схлопываться.
 
     # Для per_url и batch_listing:
     kind: Optional[DiscoveryKind] = None
@@ -281,6 +287,7 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
                 address=s.get("address"),
                 quizplease_city_id=s.get("quizplease_city_id"),
                 full_snapshot=s.get("full_snapshot", False),
+                distinct_events=s.get("distinct_events", False),
                 vk_city_id=s.get("vk_city_id"),
                 vk_groups=s.get("vk_groups") or [],
                 telegram_sources=[
