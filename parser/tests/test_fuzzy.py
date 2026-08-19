@@ -235,3 +235,37 @@ def test_cluster_reports_grey_zone_pairs():
     assert len(clusters) == 2
     assert len(pairs) == 1
     assert 0.5 <= pairs[0].score.score < MERGE
+
+
+def test_score_pair_same_distinct_source_never_merges():
+    """Две игры QuizPlease в одном зале в 19:30 — разные игры, а не переформулировка."""
+    a = _row("Квиз, плиз! PERM", "Ресторан Кама", "19:30", source="quizplease")
+    b = _row("Квиз, плиз! [новички] PERM", "Ресторан Кама", "19:30", source="quizplease")
+    assert score_pair(a, b, distinct_sources=frozenset({"quizplease"})) == PairScore(
+        0.0, 0.0, 0.0, "same_distinct_source"
+    )
+
+
+def test_score_pair_distinct_guard_applies_only_within_one_source():
+    """Флаг запрещает слияние внутри источника: кросс-источниковый дубль по-прежнему ловится."""
+    a = _row("Квиз, плиз! PERM", "Ресторан Кама", "19:30", source="quizplease")
+    b = _row("Квиз, плиз! PERM", "Ресторан Кама", "19:30", source="vk-posts")
+    assert score_pair(a, b, distinct_sources=frozenset({"quizplease"})).score >= MERGE
+
+
+def test_cluster_distinct_source_rows_stay_apart():
+    a = _row("Квиз, плиз! PERM", "Ресторан Кама", "19:30", source="quizplease")
+    b = _row("Квиз, плиз! [новички] PERM", "Ресторан Кама", "19:30", source="quizplease")
+    clusters, _pairs = cluster_events(
+        [a, b], merge_threshold=MERGE, report_threshold=CANDIDATE,
+        distinct_sources=frozenset({"quizplease"}),
+    )
+    assert [len(c) for c in clusters] == [1, 1]
+
+
+def test_cluster_same_source_without_flag_still_merges():
+    """ПЕРММ отдаёт один экспонат двумя эндпоинтами — его самодубли настоящие."""
+    a = _row("Выставка «Стечение обстоятельств»", "Музей современного искусства «ПЕРММ»",
+             source="permm")
+    b = _row("Стечение обстоятельств", "Музей современного искусства «ПЕРММ»", source="permm")
+    assert len(_clusters_of([a, b])[0]) == 2

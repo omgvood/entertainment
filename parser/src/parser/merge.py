@@ -172,6 +172,7 @@ def fuzzy_merge(
     rows: list[EventRow],
     existing: list[EventRow],
     priorities: dict[str, int],
+    distinct_sources: frozenset[str] = frozenset(),
 ) -> FuzzyResult:
     """Слой 2: не даёт создать новую карточку событию, которое уже есть под другим названием.
 
@@ -191,6 +192,7 @@ def fuzzy_merge(
         [*rows, *pool],
         merge_threshold=DEDUP_MERGE_SCORE,
         report_threshold=DEDUP_CANDIDATE_SCORE,
+        distinct_sources=distinct_sources,
     )
     result.candidates = pairs
 

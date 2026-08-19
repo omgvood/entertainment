@@ -47,7 +47,8 @@ class PairScore:
     title_score: float
     venue_score: float
     reason: str
-    """'ok' | 'time_mismatch' (жёсткий guard) | 'no_supporting_signals' (штраф 0.9)."""
+    """'ok' | 'time_mismatch' | 'same_distinct_source' (жёсткие guard'ы)
+    | 'no_supporting_signals' (штраф 0.9)."""
     score_without_containment: float = 0.0
     """Тот же score, но без метрики вложенности — по нему кластеризация узнаёт рёбра,
     которые держатся только на «короткий заголовок ⊂ длинный»."""
@@ -149,8 +150,20 @@ def _venue_factor(venue_score: float) -> float:
     return 0.5
 
 
-def score_pair(a: EventRow, b: EventRow) -> PairScore:
-    """Насколько вероятно, что a и b — одно событие. Одинаковость city+date подразумевается."""
+def score_pair(
+    a: EventRow, b: EventRow, *, distinct_sources: frozenset[str] = frozenset()
+) -> PairScore:
+    """Насколько вероятно, что a и b — одно событие. Одинаковость city+date подразумевается.
+
+    distinct_sources — источники, у которых одна строка = одно событие (см. SourceConfig
+    .distinct_events). Две строки такого источника не сливаются никогда.
+    """
+    # Источник сам гарантирует различность: у каждой игры QuizPlease свой id в API, и
+    # «Квиз, плиз! PERM» с «Квиз, плиз! [новички] PERM» в одном зале в 19:30 — две игры.
+    # Текстом это не отличить: «Фотография как искусство» и «…(12+)» — настоящий дубль.
+    if a.source == b.source and a.source in distinct_sources:
+        return PairScore(0.0, 0.0, 0.0, "same_distinct_source")
+
     # Жёсткий guard: разное время в один день на одной площадке — это разные сеансы
     # (планетарий, квизы в баре), а не разная формулировка одного анонса.
     if a.time_start and b.time_start and a.time_start != b.time_start:
@@ -234,6 +247,7 @@ def cluster_events(
     *,
     merge_threshold: float,
     report_threshold: float,
+    distinct_sources: frozenset[str] = frozenset(),
 ) -> tuple[list[list[EventRow]], list[ScoredPair]]:
     """Группирует строки в кластеры-дубли: ребро при score >= merge_threshold,
     кластер = компонента связности.
@@ -270,7 +284,7 @@ def cluster_events(
         ordered = sorted(block, key=lambda r: r.id)  # детерминированный порядок сравнений
         for i, a in enumerate(ordered):
             for b in ordered[i + 1 :]:
-                ps = score_pair(a, b)
+                ps = score_pair(a, b, distinct_sources=distinct_sources)
                 if ps.score >= report_threshold:
                     pairs.append(ScoredPair(a, b, ps))
                 if ps.score >= merge_threshold:
