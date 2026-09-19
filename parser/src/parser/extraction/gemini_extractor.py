@@ -17,7 +17,7 @@ from selectolax.parser import HTMLParser
 from ..models import ParsedEvent
 from ._errors import is_rate_limit
 from .base import ExtractorError, LLMExtractor, RateLimitError
-from .prompts import DATE_ALWAYS_INSTRUCTIONS
+from .prompts import DATE_ALWAYS_INSTRUCTIONS, NON_EVENT_INSTRUCTIONS
 
 
 log = structlog.get_logger()
@@ -68,6 +68,7 @@ _SYSTEM_PROMPT_BATCH = f"""Ты — экстрактор данных о раз�
 - price_min/price_max в рублях, целые числа. Если цена одна — повтори в обоих полях.
 - price_text — готовая строка для UI: 'от 500 ₽', 'от 500 до 1000 ₽'.
 {DATE_ALWAYS_INSTRUCTIONS}
+{NON_EVENT_INSTRUCTIONS}
 - date в формате YYYY-MM-DD. time_start/end в формате HH:MM.
 - image_url — это должна быть РЕАЛЬНАЯ ФОТОГРАФИЯ события или площадки (типичный JPG/PNG/WebP постер 400+px). Игнорируй:
   • SVG-иконки и пиктограммы (рейтинги, уровни сложности, маркеры, стрелки, logo)

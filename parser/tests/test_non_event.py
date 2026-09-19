@@ -105,3 +105,15 @@ async def test_vk_prefilter_uses_group_source_type(monkeypatch):
     assert "парковки" not in newsgroup_doc
     assert "Шоу каскадеров" in newsgroup_doc
     assert "парковки" in afisha_doc
+
+
+# --- слой 2: правило в batch-промптах ---
+
+
+def test_batch_prompts_exclude_non_events():
+    """Посты идут через extract_many → правило обязано быть в BATCH-промпте каждого экстрактора."""
+    from parser.extraction import deepseek_extractor, gemini_extractor, groq_extractor
+
+    phrase = "НЕ являются событиями"
+    for mod in (deepseek_extractor, gemini_extractor, groq_extractor):
+        assert phrase in mod._SYSTEM_PROMPT_BATCH, mod.__name__
