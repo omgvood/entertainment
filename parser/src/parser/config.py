@@ -238,6 +238,9 @@ class SourceConfig:
     """ID города VK для groups.search (опц.; если None — поиск только по названию города)."""
     vk_groups: list[str] = field(default_factory=list)
     """Список screen names кураторских VK-сообществ для vk_posts."""
+    vk_source_types: dict[str, SourceType] = field(default_factory=dict)
+    """Строгость префильтра по группам vk_groups (screen-name → SourceType). Группы без ключа —
+    SOCIAL. aggregator — для пабликов с новостями/рекламой (нужна дата И маркер/билеты)."""
 
     # Для telegram_posts:
     telegram_sources: list[TelegramChannelConfig] = field(default_factory=list)
@@ -290,6 +293,10 @@ def load_seeds(path: Path | None = None) -> dict[str, CityConfig]:
                 distinct_events=s.get("distinct_events", False),
                 vk_city_id=s.get("vk_city_id"),
                 vk_groups=s.get("vk_groups") or [],
+                vk_source_types={
+                    group: SourceType(t)
+                    for group, t in (s.get("vk_source_types") or {}).items()
+                },
                 telegram_sources=[
                     TelegramChannelConfig(
                         channel=t["channel"],

@@ -18,7 +18,7 @@ import structlog
 from supabase import Client
 
 from .classifiers import is_event_candidate
-from .config import DEDUP_MERGE_SCORE, CityConfig, SourceConfig
+from .config import DEDUP_MERGE_SCORE, CityConfig, SourceConfig, SourceType
 from .db import (
     WriteStats,
     cleanup_old_dedup_candidates,
@@ -691,12 +691,13 @@ async def _run_vk_posts_source(
             continue
 
         # Префильтр: свежие посты-кандидаты, ещё не обработанные (raw_documents по хешу текста).
+        source_type = source.vk_source_types.get(screen, SourceType.SOCIAL)
         candidates: list[tuple[str, str]] = []
         for p in posts:
             if not vk_mod.post_within_days(p, 14):
                 continue
             text = p.get("text") or ""
-            if not vk_mod.is_event_candidate(text):
+            if not is_event_candidate(text, source_type):
                 continue
             url = vk_mod.post_url(p.get("owner_id"), p.get("id"))
             if not dry_run and supabase is not None:
