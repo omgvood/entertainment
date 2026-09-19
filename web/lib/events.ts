@@ -8,6 +8,7 @@
 
 import { supabase } from "./supabase";
 import type { City, EventItem, EventType } from "./types";
+import { seriesKey } from "./series";
 
 export { getCityToday } from "./dateUtil";
 
@@ -104,4 +105,27 @@ export async function getEventBySlug(
   }
 
   return data ? rowToEvent(data as EventRow) : null;
+}
+
+/**
+ * События города на время сборки: страниц событий ~400, и без мемоизации
+ * каждая тянула бы весь город заново ради блока «Другие даты».
+ */
+const cityEventsMemo = new Map<string, Promise<EventItem[]>>();
+
+function getEventsByCityMemo(city: City, today: string): Promise<EventItem[]> {
+  const key = `${city}|${today}`;
+  let pending = cityEventsMemo.get(key);
+  if (!pending) {
+    pending = getEventsByCity(city, today);
+    cityEventsMemo.set(key, pending);
+  }
+  return pending;
+}
+
+/** Остальные сеансы той же серии — тем же ключом, что и карточка «ещё N дат» на главной. */
+export async function getSeriesSiblings(city: City, event: EventItem, today: string): Promise<EventItem[]> {
+  const key = seriesKey(event);
+  const events = await getEventsByCityMemo(city, today);
+  return events.filter((e) => e.id !== event.id && seriesKey(e) === key);
 }

@@ -1,12 +1,13 @@
 import Image from "next/image";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Header } from "@/components/Header";
-import { getEventBySlug, getEventsByCity, getCityToday } from "@/lib/events";
+import { getEventBySlug, getEventsByCity, getCityToday, getSeriesSiblings } from "@/lib/events";
 import { EVENT_TYPE_LABELS } from "@/lib/types";
 import type { EventItem } from "@/lib/types";
 import { eventBadgeStyle, eventPlaceholder } from "@/lib/event-styles";
+import { BackLink } from "@/components/BackLink";
+import { OtherDates } from "@/components/OtherDates";
 
 function isUsableImage(url?: string): boolean {
   if (!url) return false;
@@ -65,18 +66,15 @@ export default async function EventPage(
   const event = await getEventBySlug("perm", slug);
   if (!event) notFound();
 
+  const siblings = await getSeriesSiblings("perm", event, getCityToday("perm"));
+
   const placeholder = eventPlaceholder(event.type);
 
   return (
     <>
       <Header />
       <article className="mx-auto max-w-2xl px-4 pt-6 pb-12 flex-1 w-full">
-        <Link
-          href="/perm"
-          className="inline-flex items-center gap-1 text-sm text-muted hover:text-accent mb-4"
-        >
-          ← Все события
-        </Link>
+        <BackLink city="perm" />
 
         <div className="relative aspect-[21/9] bg-bg rounded-[20px] overflow-hidden mb-5">
           {isUsableImage(event.imageUrl) ? (
@@ -152,6 +150,8 @@ export default async function EventPage(
             Перейти к источнику →
           </a>
         </div>
+
+        <OtherDates current={event} siblings={siblings} />
       </article>
 
       <footer className="bg-surface border-t border-border py-5 text-center text-[13px] text-muted">
