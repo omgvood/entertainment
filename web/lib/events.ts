@@ -9,6 +9,8 @@
 import { supabase } from "./supabase";
 import type { City, EventItem, EventType } from "./types";
 
+export { getCityToday } from "./dateUtil";
+
 /** Сырая строка из таблицы public.events (snake_case). */
 interface EventRow {
   id: string;
@@ -66,24 +68,6 @@ function rowToEvent(r: EventRow): EventItem {
     metaTitle: r.meta_title ?? undefined,
     metaDescription: r.meta_description ?? undefined,
   };
-}
-
-/** IANA-таймзона города — «сегодня» считается по местному времени, не по UTC сервера сборки. */
-const CITY_TIMEZONES: Record<City, string> = {
-  perm: "Asia/Yekaterinburg", // UTC+5
-  sochi: "Europe/Moscow", // UTC+3
-};
-
-/** «Сегодня» в таймзоне города — единственное место в кодовой базе, где текущий момент превращается в календарную дату. */
-export function getCityToday(city: City): string {
-  const timezone = CITY_TIMEZONES[city] ?? "Europe/Moscow";
-  // en-CA даёт YYYY-MM-DD; timeZone делает дату местной (билд идёт в 21:00 UTC).
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
 }
 
 export async function getEventsByCity(city: City, today: string): Promise<EventItem[]> {
