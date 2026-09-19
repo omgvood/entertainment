@@ -11,7 +11,22 @@ function formatDate(event: EventItem): string {
   return event.timeStart ? `${day}, ${event.timeStart}` : day;
 }
 
-export function EventCard({ event }: { event: EventItem }) {
+interface EventCardProps {
+  event: EventItem;
+  /** Серия: сколько ещё дат и до какой — из lib/series.otherDates. */
+  moreDates?: { count: number; lastDate: string } | null;
+}
+
+function pluralDates(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return "дат";
+  if (mod10 === 1) return "дата";
+  if (mod10 >= 2 && mod10 <= 4) return "даты";
+  return "дат";
+}
+
+export function EventCard({ event, moreDates }: EventCardProps) {
   const placeholder = eventPlaceholder(event.type);
 
   return (
@@ -60,7 +75,14 @@ export function EventCard({ event }: { event: EventItem }) {
         )}
 
         <div className="flex flex-col gap-1 text-[12.5px] text-muted mt-auto">
-          <span>📅 {formatDate(event)}</span>
+          <span>
+            📅 {formatDate(event)}
+            {moreDates && (
+              <small className="ml-1 text-[11px] text-accent-cyan">
+                · ещё {moreDates.count} {pluralDates(moreDates.count)} до {formatDayMonth(moreDates.lastDate)}
+              </small>
+            )}
+          </span>
           <span>
             💰 {event.priceText}
             {event.priceNote && (
