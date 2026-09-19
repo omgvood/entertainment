@@ -3,10 +3,20 @@
 import { useEffect, useMemo, useState } from "react";
 import type { City, EventItem, VenueItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
-import { applyFilters, DEFAULT_FILTERS, typesByFrequency, type Filters } from "@/lib/filters";
-import { groupByDay } from "@/lib/dayGroups";
-import { addDaysUTC, formatDayMonth } from "@/lib/dateUtil";
+import {
+  DEFAULT_FILTERS,
+  typesByFrequency,
+  visibleSeries,
+  type DateSel,
+  type Filters,
+  type SeriesView,
+} from "@/lib/filters";
+import { compareByDateTime, groupByDate, groupSeries, otherDates } from "@/lib/series";
+import { buildDateStrip, firstNonEmptyDay, type StripItem } from "@/lib/dateStrip";
+import { listStateKey, parseState, serializeState } from "@/lib/urlState";
+import { formatWeekdayDayMonth, getCityToday } from "@/lib/dateUtil";
 import { FilterBar } from "./FilterBar";
+import { DateStrip } from "./DateStrip";
 import { EventCard } from "./EventCard";
 import { VenuesSection } from "./VenuesSection";
 import { VenueCard } from "./VenueCard";
@@ -17,57 +27,91 @@ interface CityViewProps {
   /** Все площадки города: восемь идут в секцию «Постоянные места», остальные участвуют в поиске. */
   venues: VenueItem[];
   city: City;
-  /** Календарная дата "сегодня" в таймзоне города — из getCityToday(city), см. page.tsx. */
+  /** «Сегодня» на момент сборки (getCityToday). После монтирования пересчитывается — сборка могла не пройти. */
   today: string;
 }
 
-export function CityView({ events, venues, city, today }: CityViewProps) {
-  const types = useMemo(() => typesByFrequency(events), [events]);
+export function CityView({ events, venues, city, today: buildToday }: CityViewProps) {
+  const [today, setToday] = useState(buildToday);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
-  const tomorrow = useMemo(() => addDaysUTC(today, 1), [today]);
-
-  // Статический HTML один на все query-строки, поэтому ?q= читается только
+  // Статический HTML один на все query-строки, поэтому URL читается только
   // на клиенте. useSearchParams() из next/navigation не годится: он требует
   // <Suspense> и уводит страницу из чистого SSG.
   const [urlRead, setUrlRead] = useState(false);
+  /** Выбор даты по умолчанию, зафиксированный при первом заходе; в URL не пишется. */
+  const [autoDate, setAutoDate] = useState<DateSel | null>(null);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- единоразовое чтение часов и URL после монтирования, не подписка */
   useEffect(() => {
-    const initial = new URLSearchParams(window.location.search).get("q");
-    // Единоразовое чтение ?q= сразу после монтирования, не подписка на внешний
-    // источник — предупреждение react-hooks/set-state-in-effect здесь не о чем.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (initial) setQuery(initial);
+    // Сайт пересобирается раз в сутки; если сборка не прошла, today из пропа — вчерашний.
+    const liveToday = getCityToday(city);
+    const initial = parseState(window.location.search, liveToday);
+    setToday(liveToday);
+    setFilters(initial.filters);
+    setQuery(initial.query);
     setUrlRead(true);
-  }, []);
+  }, [city]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Состояние сохраняется синхронно: клик по фильтру и сразу переход в событие
+  // не должны терять последний клик. Откладывать на размонтирование нельзя —
+  // к тому моменту роутер уже мог записать в историю URL страницы события.
+  const writeState = (search: string) => {
+    const url = new URL(window.location.href);
+    url.search = search;
+    // replaceState, а не pushState: иначе «Назад» отматывает каждый клик по фильтру.
+    window.history.replaceState(null, "", url);
+    try {
+      sessionStorage.setItem(listStateKey(city), search);
+    } catch {
+      // Хранилище недоступно (приватный режим) — «← Все события» просто ведёт на главную.
+    }
+  };
+
+  // Фильтры — дискретные клики, пишем сразу.
   useEffect(() => {
-    if (!urlRead) return; // не затирать ?q= до того, как он прочитан
-    const id = setTimeout(() => {
-      const url = new URL(window.location.href);
-      const trimmed = query.trim();
-      if (trimmed) url.searchParams.set("q", trimmed);
-      else url.searchParams.delete("q");
-      // replaceState, а не pushState: иначе «Назад» отматывает запрос по буквам.
-      window.history.replaceState(null, "", url);
-    }, 300);
+    if (!urlRead) return; // не затирать URL до того, как он прочитан
+    writeState(serializeState(filters, query));
+    // query здесь намеренно не в зависимостях: набор текста пишется ниже с задержкой.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, urlRead]);
+
+  // Поиск — набор по буквам: задержка, чтобы не дёргать историю на каждый символ.
+  // sessionStorage при этом отстаёт максимум на 300 мс только для текста запроса.
+  useEffect(() => {
+    if (!urlRead) return;
+    const id = setTimeout(() => writeState(serializeState(filters, query)), 300);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, urlRead]);
 
-  // Сегодня/Завтра не зависят от вкладки "Когда" — фильтруем только по типу/цене.
-  const byTypeAndPrice = useMemo(
-    () => applyFilters(events, { ...filters, when: "any" }, today),
-    [events, filters, today],
+  const liveEvents = useMemo(() => events.filter((e) => e.date >= today), [events, today]);
+  const series = useMemo(() => groupSeries(liveEvents), [liveEvents]);
+  const types = useMemo(() => typesByFrequency(liveEvents), [liveEvents]);
+  const strip = useMemo(() => buildDateStrip(today), [today]);
+  const counts = useMemo(
+    () =>
+      new Map<DateSel, number>(
+        strip.map((item) => [item.sel, visibleSeries(series, filters, item.sel, today).length]),
+      ),
+    [strip, series, filters, today],
   );
-  const groups = useMemo(() => groupByDay(byTypeAndPrice, today), [byTypeAndPrice, today]);
 
-  // "Дальше" — то же самое множество, доп. отфильтрованное по вкладке "Когда".
-  const later = useMemo(
-    () => (filters.when === "any" ? groups.later : applyFilters(groups.later, filters, today)),
-    [groups.later, filters, today],
-  );
+  /* eslint-disable react-hooks/set-state-in-effect -- умолчание фиксируется один раз, иначе смена типа молча перескакивала бы на другой день */
+  useEffect(() => {
+    if (urlRead && autoDate === null) setAutoDate(firstNonEmptyDay(strip, counts) ?? "all");
+  }, [urlRead, autoDate, strip, counts]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  const totalFound = groups.today.length + groups.tomorrow.length + later.length;
+  const selected: DateSel = filters.date ?? autoDate ?? "today";
+
+  const days = useMemo(() => {
+    const views = visibleSeries(series, filters, selected, today).sort((a, b) =>
+      compareByDateTime(a.shown, b.shown),
+    );
+    return groupByDate(views, (v) => v.shown.date);
+  }, [series, filters, selected, today]);
 
   // Порог в 2 символа плюс проверка на осмысленность: запрос «куда сходить»
   // состоит из одних стоп-слов, терминов не даёт, и показывать по нему
@@ -75,26 +119,30 @@ export function CityView({ events, venues, city, today }: CityViewProps) {
   const queryTerms = useMemo(() => parseQuery(query), [query]);
   const searchActive = query.trim().length >= 2 && queryTerms.length > 0;
 
-  const eventDocs = useMemo(() => events.map(buildEventDoc), [events]);
+  const eventDocs = useMemo(() => liveEvents.map(buildEventDoc), [liveEvents]);
   const venueDocs = useMemo(() => venues.map(buildVenueDoc), [venues]);
 
-  // Считаем два множества: hits — что нашёл поиск, visible — что осталось
-  // после фильтров. Разница показывается подсказкой «скрыто фильтрами»,
-  // иначе AND между поиском и фильтрами превращается в ловушку.
-  const hits = useMemo(
-    () => (searchActive ? searchEvents(eventDocs, query, today) : []),
+  // Попадания схлопываются в серии в порядке релевантности; дата поиск не сужает.
+  // hitSeries — что нашёл поиск, searchViews — что осталось после фильтров;
+  // разница показывается подсказкой «скрыто фильтрами».
+  const hitSeries = useMemo(
+    () => (searchActive ? groupSeries(searchEvents(eventDocs, query, today).map((h) => h.item)) : []),
     [searchActive, eventDocs, query, today],
   );
-  const visible = useMemo(
-    () => applyFilters(hits.map((h) => h.item), filters, today),
-    [hits, filters, today],
+  const searchViews = useMemo(
+    () => visibleSeries(hitSeries, filters, "all", today),
+    [hitSeries, filters, today],
   );
   const venueHits = useMemo(
     () => (searchActive ? searchVenues(venueDocs, query) : []),
     [searchActive, venueDocs, query],
   );
 
-  const hiddenByFilters = hits.length - visible.length;
+  const totalCount = counts.get("all") ?? 0;
+  const nearest = firstNonEmptyDay(strip, counts);
+  const suggestion = nearest !== null && nearest !== selected ? strip.find((i) => i.sel === nearest) ?? null : null;
+  const filtersChanged = filters.types.size > 0 || filters.priceMin > 0 || filters.priceMax !== null;
+  const resetFilters = () => setFilters({ ...DEFAULT_FILTERS, date: filters.date });
 
   return (
     <div className="mx-auto max-w-[1440px] px-4 pt-6 pb-12 flex flex-col gap-8 flex-1 w-full">
@@ -106,7 +154,7 @@ export function CityView({ events, venues, city, today }: CityViewProps) {
           {CITY_CONFIG[city].heroPrefix} <span className="text-accent">{CITY_CONFIG[city].label}</span> ждёт
         </h1>
         <p className="text-sm text-muted mb-5">
-          {totalFound} {pluralEvents(totalFound)} на ближайшие две недели
+          {totalCount} {pluralEvents(totalCount)} в афише
         </p>
         <FilterBar
           filters={filters}
@@ -115,25 +163,39 @@ export function CityView({ events, venues, city, today }: CityViewProps) {
           query={query}
           onQueryChange={setQuery}
         />
+        <DateStrip
+          items={strip}
+          counts={counts}
+          selected={searchActive ? null : selected}
+          onSelect={(sel) => {
+            setQuery("");
+            setFilters({ ...filters, date: sel });
+          }}
+          searchActive={searchActive}
+        />
       </div>
 
       {searchActive ? (
         <SearchResults
-          events={visible}
+          views={searchViews}
           venues={venueHits.map((h) => h.item)}
           query={query}
-          hiddenByFilters={hiddenByFilters}
-          onResetFilters={() => setFilters(DEFAULT_FILTERS)}
+          hiddenByFilters={hitSeries.length - searchViews.length}
+          onResetFilters={resetFilters}
           onClearQuery={() => setQuery("")}
         />
-      ) : totalFound === 0 ? (
-        <EmptyState onReset={() => setFilters(DEFAULT_FILTERS)} />
+      ) : days.length === 0 ? (
+        <EmptyState
+          suggestion={suggestion}
+          suggestionCount={suggestion ? counts.get(suggestion.sel) ?? 0 : 0}
+          onPick={(sel) => setFilters({ ...filters, date: sel })}
+          showReset={filtersChanged}
+          onReset={resetFilters}
+        />
       ) : (
-        <>
-          <DaySection title="Сегодня" date={today} events={groups.today} />
-          <DaySection title="Завтра" date={tomorrow} events={groups.tomorrow} />
-          <DaySection title="Дальше" events={later} />
-        </>
+        days.map((day) => (
+          <DaySection key={day.date} date={day.date} views={day.items} />
+        ))
       )}
 
       {!searchActive && venues.length > 0 && (
@@ -152,50 +214,69 @@ export function CityView({ events, venues, city, today }: CityViewProps) {
   );
 }
 
-function DaySection({
-  title,
-  date,
-  events,
-}: {
-  title: string;
-  date?: string;
-  events: EventItem[];
-}) {
-  if (events.length === 0) return null;
+function SeriesGrid({ views }: { views: SeriesView[] }) {
+  return (
+    <div className="grid gap-5 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+      {views.map((v) => (
+        <EventCard key={v.series.key} event={v.shown} moreDates={otherDates(v.series, v.shown)} />
+      ))}
+    </div>
+  );
+}
 
+function DaySection({ date, views }: { date: string; views: SeriesView[] }) {
   return (
     <section>
       <div className="flex items-baseline gap-3 mb-[18px]">
-        <h2 className="text-[19px] font-extrabold m-0">{title}</h2>
-        {date && <span className="text-[13px] text-muted">{formatDayMonth(date)}</span>}
+        <h2 className="text-[19px] font-extrabold m-0">{formatWeekdayDayMonth(date)}</h2>
         <span className="ml-auto text-[11.5px] font-bold px-2.5 py-[3px] rounded-full text-accent-cyan bg-[color:var(--color-accent-cyan)]/[0.12] border border-[color:var(--color-accent-cyan)]/30">
-          {events.length} {pluralEvents(events.length)}
+          {views.length} {pluralEvents(views.length)}
         </span>
       </div>
-      <div className="grid gap-5 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-        {events.map((event) => (
-          <EventCard key={event.id} event={event} />
-        ))}
-      </div>
+      <SeriesGrid views={views} />
     </section>
   );
 }
 
-function EmptyState({ onReset }: { onReset: () => void }) {
+function EmptyState({
+  suggestion,
+  suggestionCount,
+  onPick,
+  showReset,
+  onReset,
+}: {
+  suggestion: StripItem | null;
+  suggestionCount: number;
+  onPick: (sel: DateSel) => void;
+  showReset: boolean;
+  onReset: () => void;
+}) {
   return (
     <div className="bg-surface border border-border rounded-xl p-10 text-center">
-      <p className="text-lg font-semibold mb-2">Ничего не нашлось</p>
+      <p className="text-lg font-semibold mb-2">На эту дату ничего не нашлось</p>
       <p className="text-sm text-muted mb-5">
-        Попробуйте расширить диапазон цен, отключить чекбокс «только с фиксированной
-        датой» или выбрать «Любая дата».
+        Выберите другой день в ленте выше{showReset ? " или сбросьте фильтры по типу и цене" : ""}.
       </p>
-      <button
-        type="button"
-        onClick={onReset}
-        className="px-4 py-2 bg-accent text-bg rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
-      >
-        Сбросить фильтры
-      </button>
+      <div className="flex gap-2 justify-center flex-wrap">
+        {suggestion && (
+          <button
+            type="button"
+            onClick={() => onPick(suggestion.sel)}
+            className="px-4 py-2 bg-accent text-bg rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors"
+          >
+            Ближайшее — {suggestion.label} ({suggestionCount})
+          </button>
+        )}
+        {showReset && (
+          <button
+            type="button"
+            onClick={onReset}
+            className="px-4 py-2 border border-border text-muted rounded-lg text-sm font-medium hover:text-ink transition-colors"
+          >
+            Сбросить фильтры
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -206,21 +287,21 @@ function EmptyState({ onReset }: { onReset: () => void }) {
  * оказывается визуально ниже карточки с 30 в «Сегодня», и ранжирование теряется.
  */
 function SearchResults({
-  events,
+  views,
   venues,
   query,
   hiddenByFilters,
   onResetFilters,
   onClearQuery,
 }: {
-  events: EventItem[];
+  views: SeriesView[];
   venues: VenueItem[];
   query: string;
   hiddenByFilters: number;
   onResetFilters: () => void;
   onClearQuery: () => void;
 }) {
-  if (events.length === 0 && venues.length === 0) {
+  if (views.length === 0 && venues.length === 0) {
     return (
       <div className="bg-surface border border-border rounded-xl p-10 text-center">
         <p className="text-lg font-semibold mb-2">По запросу «{query}» ничего не нашлось</p>
@@ -252,19 +333,15 @@ function SearchResults({
 
   return (
     <>
-      {events.length > 0 && (
+      {views.length > 0 && (
         <section>
           <div className="flex items-baseline gap-3 mb-[18px]" aria-live="polite">
             <h2 className="text-[19px] font-extrabold m-0">Найдено</h2>
             <span className="text-[13px] text-muted">
-              {events.length} {pluralEvents(events.length)}
+              {views.length} {pluralEvents(views.length)}
             </span>
           </div>
-          <div className="grid gap-5 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-            {events.map((event) => (
-              <EventCard key={event.id} event={event} />
-            ))}
-          </div>
+          <SeriesGrid views={views} />
           {hiddenByFilters > 0 && (
             <p className="mt-4 text-[13px] text-muted">
               Ещё {hiddenByFilters} {pluralEvents(hiddenByFilters)} скрыто фильтрами ·{" "}

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { EventType } from "@/lib/types";
 import { EVENT_TYPE_LABELS } from "@/lib/types";
-import type { Filters, WhenFilter } from "@/lib/filters";
+import type { Filters } from "@/lib/filters";
 
 interface FilterBarProps {
   filters: Filters;
@@ -12,13 +12,6 @@ interface FilterBarProps {
   query: string;
   onQueryChange: (value: string) => void;
 }
-
-const WHEN_OPTIONS: { value: WhenFilter; label: string }[] = [
-  { value: "today", label: "Сегодня" },
-  { value: "tomorrow", label: "Завтра" },
-  { value: "weekend", label: "Выходные" },
-  { value: "any", label: "Любая" },
-];
 
 export function FilterBar({ filters, onChange, availableTypes, query, onQueryChange }: FilterBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -31,9 +24,7 @@ export function FilterBar({ filters, onChange, availableTypes, query, onQueryCha
     onChange({ ...filters, types: next });
   };
 
-  const setWhen = (when: WhenFilter) => onChange({ ...filters, when });
-
-  const setPrice = (priceMin: number, priceMax: number) =>
+  const setPrice = (priceMin: number, priceMax: number | null) =>
     onChange({ ...filters, priceMin, priceMax });
 
   const visibleTypes = availableTypes.slice(0, 4);
@@ -47,7 +38,7 @@ export function FilterBar({ filters, onChange, availableTypes, query, onQueryCha
     }`;
 
   return (
-    <div className="relative flex flex-col md:flex-row md:items-center gap-3 md:gap-[14px] p-3 bg-surface border border-border rounded-2xl md:overflow-x-auto">
+    <div className="relative flex flex-col md:flex-row md:items-center gap-3 md:gap-[14px] p-3 bg-surface border border-border rounded-2xl md:overflow-x-auto [scrollbar-width:none]">
       <div className="relative w-full md:w-[240px] md:flex-none">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-[13px]">⌕</span>
         <input
@@ -120,23 +111,16 @@ export function FilterBar({ filters, onChange, availableTypes, query, onQueryCha
             )}
           </>
         )}
-      </div>
 
-      <div className="hidden md:block w-px self-stretch bg-border flex-shrink-0" />
-
-      <div className="flex gap-[3px] bg-bg border border-border rounded-[10px] p-[3px] flex-none">
-        {WHEN_OPTIONS.map((opt) => (
+        {filters.types.size > 0 && (
           <button
-            key={opt.value}
             type="button"
-            onClick={() => setWhen(opt.value)}
-            className={`text-[12.5px] font-semibold px-3 py-[6px] rounded-[7px] whitespace-nowrap ${
-              filters.when === opt.value ? "bg-surface text-ink" : "text-muted"
-            }`}
+            onClick={() => onChange({ ...filters, types: new Set() })}
+            className="text-[12.5px] font-semibold px-2 py-[7px] text-muted hover:text-ink whitespace-nowrap"
           >
-            {opt.label}
+            × Сбросить
           </button>
-        ))}
+        )}
       </div>
 
       <button
@@ -167,31 +151,17 @@ export function FilterBar({ filters, onChange, availableTypes, query, onQueryCha
             <input
               type="number"
               min={0}
-              value={filters.priceMax}
+              value={filters.priceMax ?? ""}
+              placeholder="любая"
               onChange={(e) =>
-                setPrice(filters.priceMin, Math.max(0, Number(e.target.value) || 0))
+                setPrice(
+                  filters.priceMin,
+                  e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0),
+                )
               }
               className="w-[70px] px-2 py-1.5 bg-bg border border-border rounded-md text-[13px] text-ink"
             />
             <span className="text-muted">₽</span>
-          </div>
-
-          <h3 className="mb-2.5 text-[13px] font-semibold text-muted uppercase tracking-wider flex items-center gap-2">
-            Район
-            <span className="text-[10px] bg-border text-muted px-1.5 py-[2px] rounded-full normal-case tracking-normal font-medium">
-              скоро
-            </span>
-          </h3>
-          <div className="flex flex-col gap-1 text-sm text-muted">
-            <label className="flex items-center gap-2 cursor-not-allowed">
-              <input type="checkbox" disabled /> Центр
-            </label>
-            <label className="flex items-center gap-2 cursor-not-allowed">
-              <input type="checkbox" disabled /> Мотовилиха
-            </label>
-            <label className="flex items-center gap-2 cursor-not-allowed">
-              <input type="checkbox" disabled /> Индустриальный
-            </label>
           </div>
         </div>
       )}
