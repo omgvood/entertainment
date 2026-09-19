@@ -1,20 +1,25 @@
 /**
- * Клиентская фильтрация событий.
- * Все вычисления дат — синхронные, делаются в render-функции CityView (client component).
- * SSR-mismatch невозможен: серверный prerender использует DEFAULT_FILTERS (when='any', даты не задействованы).
+ * Фильтрация серий событий. Все вычисления дат — синхронные, делаются в
+ * render-функции CityView (client component). SSR рендерит DEFAULT_FILTERS —
+ * mismatch невозможен, т.к. дата/тип/цена читаются из URL только на клиенте.
  */
 
 import type { EventItem, EventType } from "./types";
-import { addDaysUTC } from "./dateUtil";
+import type { EventSeries } from "./series";
+import { addDaysUTC, weekdayUTC } from "./dateUtil";
 import { priceKind } from "./price";
 
-export type WhenFilter = "today" | "tomorrow" | "weekend" | "any";
+/** Выбор в ленте дат; кроме именованных — конкретный день `YYYY-MM-DD`. */
+export type DateSel = "today" | "tomorrow" | "weekend" | "all" | (string & {});
 
 export interface Filters {
+  /** null — «по умолчанию»: сегодня, а если сегодня пусто — ближайший день с событиями. В URL не пишется. */
+  date: DateSel | null;
+  /** Пустой набор — все типы. */
   types: ReadonlySet<EventType>;
-  when: WhenFilter;
   priceMin: number;
-  priceMax: number;
+  /** null — без верхней границы. */
+  priceMax: number | null;
 }
 
 export const ALL_TYPES: readonly EventType[] = [
@@ -66,52 +71,72 @@ export function typesByFrequency(events: EventItem[]): EventType[] {
 }
 
 export const DEFAULT_FILTERS: Filters = {
-  types: new Set(ALL_TYPES),
-  when: "any",
+  date: null,
+  types: new Set(),
   priceMin: 0,
-  priceMax: 5000,
+  priceMax: null,
 };
 
+/** Тип и цена — всё, что не про дату. */
+export function matchesEvent(event: EventItem, filters: Filters): boolean {
+  if (filters.types.size > 0 && !filters.types.has(event.type)) return false;
+
+  // Событие с неизвестной ценой («по билетам», «Уточняйте») предикат
+  // пропускает: в БД такая цена неотличима от нуля, и прятать карточку
+  // из-за пробела в данных хуже, чем показать её. Подробнее — lib/price.ts.
+  if (priceKind(event) !== "unknown") {
+    if (event.priceMax < filters.priceMin) return false;
+    if (filters.priceMax !== null && event.priceMin > filters.priceMax) return false;
+  }
+  return true;
+}
+
 /**
- * Возвращает Set дат «этих выходных» (ближайших Сб и Вс, включая сегодня если оно Сб/Вс).
- * Окно — 7 дней вперёд начиная с today, чтобы поймать ближайшие Сб и Вс.
- * dayOfWeekUTC берём из того же UTC-парсинга, что и addDaysUTC — иначе день недели
- * может съехать на границе суток при отличии локальной TZ от UTC.
+ * Даты «этих выходных»: ближайшие Сб и Вс, включая сегодня. В воскресенье это
+ * только сегодня — следующая суббота относится уже к другим выходным.
  */
 function getWeekendDates(today: string): Set<string> {
   const result = new Set<string>();
   for (let i = 0; i < 7; i++) {
     const ymd = addDaysUTC(today, i);
-    const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+    const dow = weekdayUTC(ymd);
     if (dow === 6 || dow === 0) result.add(ymd);
+    if (dow === 0) break;
   }
   return result;
 }
 
-export function applyFilters(events: EventItem[], filters: Filters, today: string): EventItem[] {
-  const tomorrow = addDaysUTC(today, 1);
-  const weekend = filters.when === "weekend" ? getWeekendDates(today) : null;
+export function inDateSel(date: string, sel: DateSel, today: string): boolean {
+  switch (sel) {
+    case "all":
+      return true;
+    case "today":
+      return date === today;
+    case "tomorrow":
+      return date === addDaysUTC(today, 1);
+    case "weekend":
+      return getWeekendDates(today).has(date);
+    default:
+      return date === sel;
+  }
+}
 
-  return events.filter((event) => {
-    // 1. Тип
-    if (!filters.types.has(event.type)) return false;
+export interface SeriesView {
+  series: EventSeries;
+  /** Сеанс, который показывает карточка: первый по дате среди прошедших фильтры и окно. */
+  shown: EventItem;
+}
 
-    // 2. Когда
-    if (filters.when !== "any") {
-      if (filters.when === "today" && event.date !== today) return false;
-      if (filters.when === "tomorrow" && event.date !== tomorrow) return false;
-      if (filters.when === "weekend" && !weekend!.has(event.date)) return false;
-    }
-
-    // 3. Цена — пересечение диапазонов.
-    // Событие с неизвестной ценой («по билетам», «Уточняйте») предикат
-    // пропускает: в БД такая цена неотличима от нуля, и прятать карточку
-    // из-за пробела в данных хуже, чем показать её. Подробнее — lib/price.ts.
-    if (priceKind(event) !== "unknown") {
-      if (event.priceMax < filters.priceMin) return false;
-      if (event.priceMin > filters.priceMax) return false;
-    }
-
-    return true;
-  });
+export function visibleSeries(
+  series: EventSeries[],
+  filters: Filters,
+  sel: DateSel,
+  today: string,
+): SeriesView[] {
+  const views: SeriesView[] = [];
+  for (const s of series) {
+    const shown = s.events.find((e) => matchesEvent(e, filters) && inDateSel(e.date, sel, today));
+    if (shown) views.push({ series: s, shown });
+  }
+  return views;
 }
