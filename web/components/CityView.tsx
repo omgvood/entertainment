@@ -79,12 +79,14 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
 
   // Поиск — набор по буквам: задержка, чтобы не дёргать историю на каждый символ.
   // sessionStorage при этом отстаёт максимум на 300 мс только для текста запроса.
+  // filters — в зависимостях: иначе клик по фильтру в первые 300 мс после набора
+  // не отменяет уже запущенный таймер, и тот перезаписывает URL старым filters.
   useEffect(() => {
     if (!urlRead) return;
     const id = setTimeout(() => writeState(serializeState(filters, query)), 300);
     return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, urlRead]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- writeState воссоздаётся каждый рендер, но всегда читает актуальный city/window
+  }, [query, filters, urlRead]);
 
   const liveEvents = useMemo(() => events.filter((e) => e.date >= today), [events, today]);
   const series = useMemo(() => groupSeries(liveEvents), [liveEvents]);
