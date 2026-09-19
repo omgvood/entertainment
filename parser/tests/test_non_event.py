@@ -16,7 +16,9 @@ import pytest
 
 from parser.classifiers import is_event_candidate
 from parser.config import SourceConfig, SourceType, load_seeds
-from parser.pipeline import _run_vk_posts_source
+from parser.models import ParsedEvent
+from parser.pipeline import PipelineResult, _run_vk_posts_source, _safe_to_event_row
+from parser.validator import is_non_event, to_event_row
 
 
 # --- слой 1: строгий префильтр для новостных VK-групп ---
@@ -117,3 +119,114 @@ def test_batch_prompts_exclude_non_events():
     phrase = "НЕ являются событиями"
     for mod in (deepseek_extractor, gemini_extractor, groq_extractor):
         assert phrase in mod._SYSTEM_PROMPT_BATCH, mod.__name__
+
+
+# --- слой 3: постфильтр по заголовку ---
+
+# Реальные не-события, попавшие на сайт, которые постфильтр ловит узкими маркерами.
+NON_EVENT_TITLES = [
+    "Гражданин Мексики под арестом по делу о наркотиках",
+    "В Госдуме предложили открывать в детсадах вечерние группы по просьбе родителей",
+    "В Перми движение по второй очереди Средней дамбы планируют открыть 18 октября",
+    "Капитальный ремонт путепровода на улице Промышленной, 127",
+    "Розыгрыш металлической двери Аркан 206",
+    "Розыгрыш персональной фотосессии в «ПЕРММ»",
+    "Отслеживание цен на продукты",
+    "Специальное предложение от сети пиццерий «Пиццбург»",
+    "Open call на 13 сезон резиденции MaxArt x ПЕРММ",
+    "Голосование за номинантов Национальной туристической премии Russian Traveler Awards 2026",
+    "Максим из Краснокамска в телепроекте «Ждули»",
+]
+
+# Не-события, которые постфильтр НАМЕРЕННО не ловит: нужный маркер слишком широкий
+# («парковк» бывает в названиях событий: «Автокинотеатр на парковке ТРЦ»; «появится» — в
+# анонсах). Их закрывают другие слои:
+#   «Бесплатные парковки на время выборов» — префильтр (permactive → aggregator) + промпт;
+#   «На Каме появится новое пассажирское судно» — промпт (префильтр пропускает: «стоимостью»).
+# Накопленные в БД экземпляры удаляются миграцией по явному списку id (Task 4).
+
+# Настоящие события type='other' с того же сайта, должны остаться. Сюда же слова-ловушки:
+# «конкурса», «акция», «ярмарка».
+REAL_EVENT_TITLES = [
+    "Толкучка",
+    "ТОЛКУЧКА",
+    "Толкучка во дворе соцгородка “Рабочий поселок\"",
+    "Шоу каскадёров",
+    "Шоу каскадеров 2026",
+    "Осенняя ярмарка",
+    "Ярмарка и вечер Народного караоке",
+    'Цирк "Империя мастеров" в Перми!',
+    "Благотворительная акция «Давай дружить!»",
+    "Выставка-пристройство собак из приюта «Доброе сердце»",
+    "Торжественная церемония награждения победителей конкурса «Музейный Олимп»",
+    "Праздничный вечер для ветеранов",
+    "Музейная программа «Соль-вода» в музее «Хохловка»",
+    "«Полировка ГАЗ‑13 „Чайка“ — вживую в музее: приходите увидеть процесс»",
+    "Премьерный показ фильма о Романовых на фестивале «Флаэртиана»",
+    "Релакс - Ретрит «Левада»",
+    "Видеопрогулка \"Моя любимая книга\"",
+]
+
+
+def _parsed(title: str, date: str = "2026-09-20") -> ParsedEvent:
+    return ParsedEvent(
+        title=title,
+        type="other",
+        date=date,
+        price_min=0,
+        price_max=0,
+        price_text="бесплатно",
+        address="Пермь",
+        venue_name="Пермь",
+    )
+
+
+@pytest.mark.parametrize("title", NON_EVENT_TITLES)
+def test_non_event_titles_detected(title):
+    assert is_non_event(title, "vk-posts") is True
+
+
+@pytest.mark.parametrize("title", REAL_EVENT_TITLES)
+def test_real_event_titles_kept(title):
+    assert is_non_event(title, "vk-posts") is False
+
+
+@pytest.mark.parametrize("source", ["telegram-posts", "generic:domain.ru", "generic"])
+def test_non_event_applies_to_all_social_sources(source):
+    assert is_non_event("Розыгрыш металлической двери Аркан 206", source) is True
+
+
+@pytest.mark.parametrize("source", ["timepad", "quizplease", "permm", "twogis-bowling"])
+def test_structured_sources_not_filtered(source):
+    """API-источники отдают только события, их заголовки не трогаем."""
+    assert is_non_event("Голосование за лучший квиз сезона", source) is False
+
+
+def test_to_event_row_drops_non_event():
+    row = to_event_row(
+        _parsed("Розыгрыш металлической двери Аркан 206"), "perm", "https://vk.com/w", "vk-posts"
+    )
+    assert row is None
+
+
+def test_to_event_row_keeps_real_event():
+    row = to_event_row(_parsed("Осенняя ярмарка"), "perm", "https://vk.com/w", "vk-posts")
+    assert row is not None
+
+
+def test_safe_to_event_row_counts_non_event_separately():
+    """Не-событие считается в skipped_non_event, а не в skipped_always."""
+    sub = PipelineResult()
+    row = _safe_to_event_row(
+        _parsed("Гражданин Мексики под арестом по делу о наркотиках"), "perm", "https://vk.com/w", "vk-posts", sub
+    )
+    assert row is None
+    assert sub.skipped_non_event == 1
+    assert sub.skipped_always == 0
+
+
+def test_safe_to_event_row_always_still_counted_as_always():
+    sub = PipelineResult()
+    _safe_to_event_row(_parsed("Выставка", date="always"), "perm", "https://vk.com/w", "vk-posts", sub)
+    assert sub.skipped_always == 1
+    assert sub.skipped_non_event == 0

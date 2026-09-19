@@ -154,15 +154,18 @@ def _is_past_event(event_date: str, today_str: str) -> bool:
 def _safe_to_event_row(
     parsed: ParsedEvent, city: str, source_url: str, source: str, sub: "PipelineResult"
 ) -> EventRow | None:
-    """Единая точка конвертации в pipeline: to_event_row + учёт отбракованных spurious 'always'.
+    """Единая точка конвертации в pipeline: to_event_row + учёт отбракованных строк.
 
     to_event_row возвращает None, когда validator-guard отсёк галлюцинацию date='always'
-    (social/generic-источник без явной даты). Здесь это считаем в sub.skipped_always —
-    backstop на случай веток без явного фильтра. Каллер пропускает None-строку.
+    (social/generic-источник без явной даты) или не-событие (новость/реклама). Считаем их
+    раздельно в sub.skipped_always / sub.skipped_non_event. Каллер пропускает None-строку.
     """
     row = to_event_row(parsed, city, source_url, source)
     if row is None:
-        sub.skipped_always += 1
+        if is_spurious_always(parsed.date, parsed.type, source):
+            sub.skipped_always += 1
+        else:
+            sub.skipped_non_event += 1
     return row
 
 
@@ -174,6 +177,7 @@ class PipelineResult:
     failed: int = 0
     written: int = 0
     skipped_always: int = 0  # отброшено spurious date='always' (social/generic без даты)
+    skipped_non_event: int = 0  # отброшено не-событий по заголовку (новости/реклама/розыгрыши)
     duplicate_candidates: int = 0
     merged: int = 0
     near_misses: int = 0
@@ -282,9 +286,12 @@ async def run_city(
             result.extracted += sub.extracted
             result.failed += sub.failed
             result.skipped_always += sub.skipped_always
+            result.skipped_non_event += sub.skipped_non_event
             result.warnings.extend(sub.warnings)
             if sub.skipped_always:
                 log.info("source.skipped_always", source=source.name, count=sub.skipped_always)
+            if sub.skipped_non_event:
+                log.info("source.skipped_non_event", source=source.name, count=sub.skipped_non_event)
 
             if not dry_run and supabase is not None:
                 # Непустой skipped_always без других warnings → видно в source_health, что источник
@@ -292,6 +299,8 @@ async def run_city(
                 health_last_error = sub.warnings[0] if sub.warnings else None
                 if health_last_error is None and sub.skipped_always:
                     health_last_error = f"Отброшено spurious 'always': {sub.skipped_always}"
+                elif health_last_error is None and sub.skipped_non_event:
+                    health_last_error = f"Отброшено не-событий: {sub.skipped_non_event}"
                 record_source_health(
                     supabase,
                     source.name,

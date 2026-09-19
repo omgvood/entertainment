@@ -35,17 +35,46 @@ def is_spurious_always(date: str, event_type: str, source: str) -> bool:
     )
 
 
-def to_event_row(parsed: ParsedEvent, city: str, source_url: str, source: str) -> EventRow | None:
-    """ParsedEvent → EventRow. Возвращает None, если событие отбраковано (spurious 'always').
+# Эвристический guard, не классификатор: заголовки однозначных не-событий, которые LLM всё
+# равно извлекает из постов (новости городских пабликов, объявления служб, розыгрыши/промо,
+# голосования, open call). Только узкие маркеры: широкие («конкурс», «акция», «парковк»,
+# «появится») встречаются в названиях настоящих событий — такие случаи оставлены префильтру
+# и промпту (см. test_non_event). Синхронно с dry-run миграции 20260918000001.
+_NON_EVENT_TITLE_RE = re.compile(
+    r"розыгрыш|разыгрыва|промокод|специальное предложение|спецпредложение"
+    r"|голосовани|open[\s-]?call|опен[\s-]?колл|при[её]м заявок"
+    r"|госдум|законопроект|под арест|уголовн|по делу о"
+    r"|капитальный ремонт|путепровод|планируют открыть"
+    r"|отслеживани|телепроект",
+    re.IGNORECASE,
+)
 
-    None — последний рубеж против LLM-галлюцинаций date='always' для постов VK/Telegram/generic.
-    Caller обязан проверить результат на None и пропустить такую строку.
+
+def is_non_event(title: str, source: str) -> bool:
+    """True: social/generic-источник отдал заголовок новости/объявления/рекламы, а не события.
+
+    Последний рубеж после префильтра и промпта. API-источники (timepad/quizplease/...) отдают
+    только события, их не трогаем (как и в is_spurious_always).
+    """
+    return any(source.startswith(p) for p in SOCIAL_SOURCE_PREFIXES) and bool(
+        _NON_EVENT_TITLE_RE.search(title)
+    )
+
+
+def to_event_row(parsed: ParsedEvent, city: str, source_url: str, source: str) -> EventRow | None:
+    """ParsedEvent → EventRow. None, если событие отбраковано (spurious 'always' или не-событие).
+
+    None — последний рубеж против LLM-галлюцинаций date='always' и новостей/рекламы из постов
+    VK/Telegram/generic. Caller обязан проверить результат на None и пропустить такую строку.
     """
     if is_spurious_always(parsed.date, parsed.type, source):
         log.warning(
             "validator.spurious_always_dropped",
             source=source, title=parsed.title[:80], type=parsed.type,
         )
+        return None
+    if is_non_event(parsed.title, source):
+        log.warning("validator.non_event_dropped", source=source, title=parsed.title[:80])
         return None
     slug = _make_slug(parsed.title, parsed.date)
     data = parsed.model_dump()
