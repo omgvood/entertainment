@@ -1,7 +1,7 @@
 # Карточка быстрого просмотра
 
 Type: task
-Status: open
+Status: backlog
 Blocked by: 01, 02, 06, 13
 
 ## Question

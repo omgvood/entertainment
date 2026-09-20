@@ -1,7 +1,7 @@
 # Цена в схеме: бесплатно против неизвестно
 
 Type: grilling
-Status: open
+Status: backlog
 Blocked by: 01, 10
 
 ## Question

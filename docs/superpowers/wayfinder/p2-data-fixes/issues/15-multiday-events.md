@@ -1,7 +1,7 @@
 # Многодневные события: дата начала и конца
 
 Type: grilling
-Status: open
+Status: backlog
 Blocked by: —
 
 ## Question

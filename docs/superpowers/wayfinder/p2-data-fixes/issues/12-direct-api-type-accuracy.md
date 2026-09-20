@@ -1,7 +1,7 @@
 # Точность типов у direct_api
 
 Type: research
-Status: open
+Status: backlog
 Blocked by: —
 Ветка: `research/direct-api-types`
 

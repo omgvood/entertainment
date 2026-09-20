@@ -1,7 +1,7 @@
 # category и district: зафиксировать непригодность
 
 Type: task
-Status: open
+Status: backlog
 Blocked by: —
 Ветка: `fix/dead-fields-note`
 

@@ -1,7 +1,7 @@
 # endDate филармонии: шаблон или факт
 
 Type: research
-Status: open
+Status: backlog
 Blocked by: —
 Ветка: `research/filarmonia-endtime`
 

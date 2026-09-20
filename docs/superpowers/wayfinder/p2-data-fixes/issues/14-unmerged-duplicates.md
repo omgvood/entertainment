@@ -1,7 +1,7 @@
 # Дубли, которые серия не склеивает
 
 Type: grilling
-Status: open
+Status: backlog
 Blocked by: —
 
 ## Question

@@ -1,7 +1,7 @@
 # Пустой город
 
 Type: task
-Status: open
+Status: backlog
 Blocked by: —
 Ветка: `fix/empty-city-state`
 

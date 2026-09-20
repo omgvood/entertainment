@@ -1,7 +1,7 @@
 # Полнота афиши: чего мы не находим
 
 Type: research
-Status: open
+Status: backlog
 Blocked by: —
 Ветка: `research/afisha-recall`
 

@@ -1,7 +1,7 @@
 # Группы типов и формат URL
 
 Type: grilling
-Status: open
+Status: backlog
 Blocked by: —
 
 ## Question

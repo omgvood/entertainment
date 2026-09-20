@@ -1,7 +1,7 @@
 # Проверка «бесплатно» по источникам
 
 Type: research
-Status: open
+Status: backlog
 Blocked by: —
 Ветка: `research/verify-free-price`
 

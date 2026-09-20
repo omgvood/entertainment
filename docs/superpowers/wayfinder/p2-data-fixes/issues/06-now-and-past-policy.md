@@ -1,7 +1,7 @@
 # Политика «идёт сейчас» и прошедших сегодня
 
 Type: grilling
-Status: open
+Status: backlog
 Blocked by: 11
 
 ## Question

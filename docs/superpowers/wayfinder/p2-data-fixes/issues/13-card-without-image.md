@@ -1,7 +1,7 @@
 # Карточка без картинки: как она выглядит
 
 Type: prototype
-Status: open
+Status: backlog
 Blocked by: —
 Ветка: `proto/card-without-image`
 
