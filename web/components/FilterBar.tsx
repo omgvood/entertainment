@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { EventType } from "@/lib/types";
 import { EVENT_TYPE_LABELS } from "@/lib/types";
 import type { Filters } from "@/lib/filters";
@@ -16,6 +16,21 @@ interface FilterBarProps {
 export function FilterBar({ filters, onChange, availableTypes, query, onQueryChange }: FilterBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreTypesOpen, setMoreTypesOpen] = useState(false);
+  const [typesPopupPos, setTypesPopupPos] = useState({ top: 0, left: 0 });
+  const barRef = useRef<HTMLDivElement>(null);
+  const moreTypesBtnRef = useRef<HTMLButtonElement>(null);
+
+  const toggleMoreTypes = () => {
+    if (!moreTypesOpen && moreTypesBtnRef.current && barRef.current) {
+      const btnRect = moreTypesBtnRef.current.getBoundingClientRect();
+      const barRect = barRef.current.getBoundingClientRect();
+      setTypesPopupPos({
+        top: btnRect.bottom - barRect.top + 8,
+        left: btnRect.left - barRect.left,
+      });
+    }
+    setMoreTypesOpen((v) => !v);
+  };
 
   const toggleType = (t: EventType) => {
     const next = new Set(filters.types);
@@ -38,99 +53,103 @@ export function FilterBar({ filters, onChange, availableTypes, query, onQueryCha
     }`;
 
   return (
-    <div className="relative flex flex-col md:flex-row md:items-center gap-3 md:gap-[14px] p-3 bg-surface border border-border rounded-2xl md:overflow-x-auto [scrollbar-width:none]">
-      <div className="relative w-full md:w-[240px] md:flex-none">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-[13px]">⌕</span>
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onQueryChange("");
-          }}
-          placeholder="Название, площадка, организатор…"
-          aria-label="Поиск по афише"
-          className="w-full bg-bg border border-border rounded-full text-[13px] text-ink pl-8 pr-8 py-2 focus:outline-none focus:border-accent"
-        />
-        {query && (
-          <button
-            type="button"
-            onClick={() => onQueryChange("")}
-            aria-label="Очистить поиск"
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted text-[13px] hover:text-ink"
-          >
-            ✕
-          </button>
-        )}
-      </div>
-
-      <div className="hidden md:block w-px self-stretch bg-border flex-shrink-0" />
-
-      <div className="flex gap-2 flex-wrap md:flex-nowrap md:flex-none relative">
-        {visibleTypes.map((t) => {
-          const active = filters.types.has(t);
-          return (
+    <div ref={barRef} className="relative flex flex-col md:flex-row md:items-center gap-3 md:gap-[14px] p-3 bg-surface border border-border rounded-2xl">
+      <div className="contents md:flex md:items-center md:gap-[14px] md:flex-1 md:min-w-0 md:overflow-x-auto [scrollbar-width:none]">
+        <div className="relative w-full md:w-[240px] md:flex-none">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-[13px]">⌕</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") onQueryChange("");
+            }}
+            placeholder="Название, площадка, организатор…"
+            aria-label="Поиск по афише"
+            className="w-full bg-bg border border-border rounded-full text-[13px] text-ink pl-8 pr-8 py-2 focus:outline-none focus:border-accent"
+          />
+          {query && (
             <button
-              key={t}
               type="button"
-              onClick={() => toggleType(t)}
-              className={typeChipClass(active)}
+              onClick={() => onQueryChange("")}
+              aria-label="Очистить поиск"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted text-[13px] hover:text-ink"
             >
-              {EVENT_TYPE_LABELS[t]}
+              ✕
             </button>
-          );
-        })}
+          )}
+        </div>
 
-        {overflowTypes.length > 0 && (
-          <>
+        <div className="hidden md:block w-px self-stretch bg-border flex-shrink-0" />
+
+        <div className="flex gap-2 flex-wrap md:flex-nowrap md:flex-none">
+          {visibleTypes.map((t) => {
+            const active = filters.types.has(t);
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => toggleType(t)}
+                className={typeChipClass(active)}
+              >
+                {EVENT_TYPE_LABELS[t]}
+              </button>
+            );
+          })}
+
+          {overflowTypes.length > 0 && (
             <button
+              ref={moreTypesBtnRef}
               type="button"
-              onClick={() => setMoreTypesOpen((v) => !v)}
+              onClick={toggleMoreTypes}
               className="text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border border-border text-muted bg-bg whitespace-nowrap"
               aria-expanded={moreTypesOpen}
             >
               Ещё {overflowTypes.length} {moreTypesOpen ? "▴" : "▾"}
             </button>
+          )}
 
-            {moreTypesOpen && (
-              <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-[220px] bg-surface border border-border rounded-xl p-3 shadow-[0_20px_50px_-30px_rgba(139,92,246,0.5)] flex flex-wrap gap-2">
-                {overflowTypes.map((t) => {
-                  const active = filters.types.has(t);
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => toggleType(t)}
-                      className={typeChipClass(active)}
-                    >
-                      {EVENT_TYPE_LABELS[t]}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
+          {filters.types.size > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...filters, types: new Set() })}
+              className="text-[12.5px] font-semibold px-2 py-[7px] text-muted hover:text-ink whitespace-nowrap"
+            >
+              × Сбросить
+            </button>
+          )}
+        </div>
 
-        {filters.types.size > 0 && (
-          <button
-            type="button"
-            onClick={() => onChange({ ...filters, types: new Set() })}
-            className="text-[12.5px] font-semibold px-2 py-[7px] text-muted hover:text-ink whitespace-nowrap"
-          >
-            × Сбросить
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setMoreOpen((v) => !v)}
+          className="md:ml-auto flex-none self-start md:self-auto text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border border-border text-muted bg-bg whitespace-nowrap"
+          aria-expanded={moreOpen}
+        >
+          Ещё фильтры {moreOpen ? "▴" : "▾"}
+        </button>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setMoreOpen((v) => !v)}
-        className="md:ml-auto flex-none self-start md:self-auto text-[12.5px] font-semibold px-3.5 py-[7px] rounded-lg border border-border text-muted bg-bg whitespace-nowrap"
-        aria-expanded={moreOpen}
-      >
-        Ещё фильтры {moreOpen ? "▴" : "▾"}
-      </button>
+      {moreTypesOpen && (
+        <div
+          className="absolute z-20 w-[220px] bg-surface border border-border rounded-xl p-3 shadow-[0_20px_50px_-30px_rgba(139,92,246,0.5)] flex flex-wrap gap-2"
+          style={{ top: typesPopupPos.top, left: typesPopupPos.left }}
+        >
+          {overflowTypes.map((t) => {
+            const active = filters.types.has(t);
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => toggleType(t)}
+                className={typeChipClass(active)}
+              >
+                {EVENT_TYPE_LABELS[t]}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {moreOpen && (
         <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[260px] bg-surface border border-border rounded-xl p-4 shadow-[0_20px_50px_-30px_rgba(139,92,246,0.5)]">
