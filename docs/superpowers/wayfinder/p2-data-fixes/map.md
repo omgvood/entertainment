@@ -1,6 +1,7 @@
 # Карта: данные и карточка под P2
 
 Label: wayfinder:map
+Status: активен
 Эффорт: p2-data-fixes · Трекер: локальный markdown (`docs/superpowers/wayfinder/p2-data-fixes/`)
 Заведена 2026-09-20 по итогам `docs/research/2026-09-19-p2-decision-helpers.md` и последующей проверки серых зон. Сведена к волне из трёх задач 2026-09-20.
 
