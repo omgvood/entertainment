@@ -1,6 +1,7 @@
 # Группы типов и формат URL
 
 Type: grilling
+Скилл: superpowers:brainstorming — решение меняет URL и набор чипов, нужны варианты с ценой ошибки
 Status: backlog
 Blocked by: —
 

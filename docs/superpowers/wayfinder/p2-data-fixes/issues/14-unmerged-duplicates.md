@@ -1,6 +1,7 @@
 # Дубли, которые серия не склеивает
 
 Type: grilling
+Скилл: superpowers:brainstorming — выбор между порогом парсера и ключом серии на фронте
 Status: backlog
 Blocked by: —
 

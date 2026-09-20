@@ -1,6 +1,7 @@
 # Карточка быстрого просмотра
 
 Type: task
+Скилл: superpowers:test-driven-development для функции бейджа цены; остальное проверяется в превью
 Status: backlog
 Blocked by: 01, 02, 06, 13
 

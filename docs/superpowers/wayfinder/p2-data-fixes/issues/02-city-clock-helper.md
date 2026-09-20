@@ -1,6 +1,7 @@
 # Час города: helper текущего времени
 
 Type: task
+Скилл: superpowers:test-driven-development — тест с `vi.setSystemTime` на два города
 Status: open
 Blocked by: —
 Ветка: `fix/city-clock-helper`

@@ -1,6 +1,7 @@
 # Точность типов у direct_api
 
 Type: research
+Скилл: mattpocock-skills:research — сверка с сайтами источников
 Status: backlog
 Blocked by: —
 Ветка: `research/direct-api-types`

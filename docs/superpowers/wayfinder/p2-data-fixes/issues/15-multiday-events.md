@@ -1,6 +1,7 @@
 # Многодневные события: дата начала и конца
 
 Type: grilling
+Скилл: superpowers:brainstorming — решение меняет модель данных
 Status: backlog
 Blocked by: —
 

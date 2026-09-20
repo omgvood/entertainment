@@ -1,6 +1,7 @@
 # Проверка «бесплатно» по источникам
 
 Type: research
+Скилл: mattpocock-skills:research — ответ снаружи репозитория, нужны первоисточники
 Status: backlog
 Blocked by: —
 Ветка: `research/verify-free-price`

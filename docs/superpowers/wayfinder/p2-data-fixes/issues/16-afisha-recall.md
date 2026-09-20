@@ -1,6 +1,7 @@
 # Полнота афиши: чего мы не находим
 
 Type: research
+Скилл: mattpocock-skills:research — сравнение с внешними афишами
 Status: backlog
 Blocked by: —
 Ветка: `research/afisha-recall`

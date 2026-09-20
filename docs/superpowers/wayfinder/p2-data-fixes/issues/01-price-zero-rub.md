@@ -1,6 +1,7 @@
 # Цена: `0 ₽` больше не «бесплатно»
 
 Type: task
+Скилл: superpowers:test-driven-development — тест в `price.test.ts` пишется первым и падает
 Status: open
 Blocked by: —
 Ветка: `fix/price-zero-rub`

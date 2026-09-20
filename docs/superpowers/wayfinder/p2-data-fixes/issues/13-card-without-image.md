@@ -1,6 +1,7 @@
 # Карточка без картинки: как она выглядит
 
 Type: prototype
+Скилл: mattpocock-skills:prototype — вопрос «как это выглядит», словами не решается
 Status: backlog
 Blocked by: —
 Ветка: `proto/card-without-image`

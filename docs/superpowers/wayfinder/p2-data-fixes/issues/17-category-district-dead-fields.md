@@ -1,6 +1,7 @@
 # category и district: зафиксировать непригодность
 
 Type: task
+Скилл: не нужен — документационная правка
 Status: backlog
 Blocked by: —
 Ветка: `fix/dead-fields-note`

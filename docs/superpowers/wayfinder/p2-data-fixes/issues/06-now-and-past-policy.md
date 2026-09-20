@@ -1,6 +1,7 @@
 # Политика «идёт сейчас» и прошедших сегодня
 
 Type: grilling
+Скилл: superpowers:brainstorming — политика влияет и на карточку, и на счётчики ленты
 Status: backlog
 Blocked by: 11
 

@@ -1,6 +1,7 @@
 # Теги: определения, авто-теги, слияние
 
 Type: grilling
+Скилл: superpowers:brainstorming — затрагивает промпты, валидатор и слияние, требует перепарсинга
 Status: backlog
 Blocked by: 12
 

@@ -1,6 +1,7 @@
 # endDate филармонии: шаблон или факт
 
 Type: research
+Скилл: mattpocock-skills:research — ответ на страницах сайта, а не в коде
 Status: backlog
 Blocked by: —
 Ветка: `research/filarmonia-endtime`

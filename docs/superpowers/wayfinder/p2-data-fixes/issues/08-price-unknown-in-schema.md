@@ -1,6 +1,7 @@
 # Цена в схеме: бесплатно против неизвестно
 
 Type: grilling
+Скилл: superpowers:brainstorming — решение меняет схему БД и промпты парсера
 Status: backlog
 Blocked by: 01, 10
 
