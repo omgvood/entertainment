@@ -1,7 +1,6 @@
 # Python parser
 parser/__pycache__/
 parser/*.pyc
-parser/.pytest_cache/
 parser/.venv/
 parser/venv/
 *.pyc
@@ -23,10 +22,14 @@ Thumbs.db
 *.swp
 
 # Локальные данные и черновики (не для репозитория)
-input-output/
 docs/*
+!docs/agents/
 !docs/superpowers/
-prototype/redesign.7z
+!docs/research/
+prototype/
+
+# Pytest
+.pytest_cache/
 
 # Отладочные скрипты и дампы HTML (локальная диагностика парсера)
 #debug_parse_2gis.py
