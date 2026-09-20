@@ -51,7 +51,22 @@ export function getCityToday(city: City): string {
   }).format(new Date());
 }
 
-const WEEKDAYS_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+/** «Сейчас» в таймзоне города — минуты от местной полуночи, чтобы «через 2 ч» считалось по часам города, а не зрителя. */
+export function getCityNowMinutes(city: City): number {
+  const timezone = CITY_TIMEZONES[city] ?? "Europe/Moscow";
+  // hourCycle h23, иначе полночь приходит как 24:00.
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === "hour")?.value);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value);
+  return hour * 60 + minute;
+}
+
+const WEEKDAYS_SHORT =["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
 /** День недели календарной строки: 0 — воскресенье, 6 — суббота. */
 export function weekdayUTC(ymd: string): number {
