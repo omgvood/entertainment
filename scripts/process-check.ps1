@@ -17,6 +17,9 @@ param(
 $stdin = [Console]::In.ReadToEnd()
 if ($stdin -match '"stop_hook_active"\s*:\s*true') { exit 0 }
 
+$sessionId = $null
+if ($stdin -match '"session_id"\s*:\s*"([^"]+)"') { $sessionId = $Matches[1] }
+
 function Fail($text) {
     [Console]::Error.WriteLine($text)
     exit 2
@@ -83,6 +86,17 @@ $mainBehind = ($LASTEXITCODE -eq 0 -and [int]$behind -gt 0)
 
 if ($findings.Count -eq 0 -and -not $mainBehind) { exit 0 }
 
+# Одно и то же замечание каждый ход перестают читать. Пока набор находок
+# не изменился, сессии оно называется один раз; новая находка прорывается.
+$signature = (($findings | Sort-Object) -join "`n") + "|behind=$behind"
+$stateFile = $null
+if ($sessionId) {
+    $stateDir = Join-Path $root '.git/process-check'
+    if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
+    $stateFile = Join-Path $stateDir "$sessionId.txt"
+    if ((Test-Path $stateFile) -and (Get-Content $stateFile -Raw) -eq $signature) { exit 0 }
+}
+
 $msg = @("R-04: уборка после мерджа не сделана (docs/agents/session-protocol.md).")
 
 if ($findings.Count -gt 0) {
@@ -105,5 +119,7 @@ if ($mainBehind) {
 $msg += ""
 $msg += "Скажи об этом вслух. Если убирать сейчас нечего — так и скажи, и отметь"
 $msg += "повтор R-04 в журнале: правило уже срабатывало вхолостую."
+
+if ($stateFile) { Set-Content -Path $stateFile -Value $signature -NoNewline }
 
 Fail ($msg -join "`n")
