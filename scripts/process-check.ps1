@@ -59,6 +59,11 @@ foreach ($t in $trees) {
     if ($t.Path -eq $root) { continue }   # текущая сессия — она ещё работает
     if (-not $t.Branch)    { continue }   # detached HEAD, не наш случай
 
+    # Незакоммиченная работа — признак живого worktree. Коммитов может не быть
+    # вовсе, а работа в нём идти: предлагать удаление такого нельзя.
+    $dirty = (git -C $t.Path status --porcelain 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $dirty) { continue }
+
     $ahead = (git rev-list --count "master..$($t.Branch)" 2>$null)
     if ($LASTEXITCODE -ne 0) { continue }
 
