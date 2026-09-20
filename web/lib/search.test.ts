@@ -105,7 +105,13 @@ describe("buildEventDoc", () => {
     expect(allTokens(buildEventDoc(baseEvent))).not.toContain("бесплатно");
   });
 
-  it.each([["Бесплатно"], ["Вход свободный"], ["0 ₽"]])(
+  it("не добавляет токен «бесплатно» при price_text=0 ₽", () => {
+    expect(allTokens(buildEventDoc({ ...baseEvent, priceText: "0 ₽" }))).not.toContain(
+      "бесплатно",
+    );
+  });
+
+  it.each([["Бесплатно"], ["Вход свободный"]])(
     "добавляет токен «бесплатно» при price_text=%s",
     (priceText) => {
       const doc = buildEventDoc({ ...baseEvent, priceText });
