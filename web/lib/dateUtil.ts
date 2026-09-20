@@ -66,7 +66,7 @@ export function getCityNowMinutes(city: City): number {
   return hour * 60 + minute;
 }
 
-const WEEKDAYS_SHORT =["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+const WEEKDAYS_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
 /** День недели календарной строки: 0 — воскресенье, 6 — суббота. */
 export function weekdayUTC(ymd: string): number {
