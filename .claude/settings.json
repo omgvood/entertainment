@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/scripts/process-check.ps1\" -Mode stop",
+            "timeout": 30,
+            "statusMessage": "Проверка R-04: ветки и worktree"
+          }
+        ]
+      }
+    ]
+  }
+}
