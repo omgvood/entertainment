@@ -2,9 +2,10 @@
 
 Type: prototype
 Скилл: mattpocock-skills:prototype — вопрос «как это выглядит», словами не решается
-Status: backlog
+Status: open
 Blocked by: —
 Ветка: `proto/card-without-image`
+Волна: 2 (открыта 2026-09-20)
 
 ## Question
 

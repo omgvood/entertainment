@@ -2,9 +2,10 @@
 
 Type: task
 Скилл: не нужен — правка вёрстки, тестового окружения для компонентов в проекте нет; проверка: lint, tsc, превью
-Status: backlog
+Status: open
 Blocked by: —
 Ветка: `fix/empty-city-state`
+Волна: 2 (открыта 2026-09-20)
 
 ## Question
 
