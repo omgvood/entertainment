@@ -2,8 +2,9 @@
 
 Type: task
 Скилл: superpowers:test-driven-development для функции бейджа цены; остальное проверяется в превью
-Status: backlog
+Status: resolved
 Blocked by: 01, 02, 06, 13
+Ветка: `fix/quick-scan-card`
 
 ## Question
 
@@ -22,3 +23,19 @@ Blocked by: 01, 02, 06, 13
 - Карточка собрана по решениям тикетов 06 и 13, бейдж покрыт тестами на все четыре случая.
 - «Через N ч» считается helper'ом из тикета 02, а не локальным временем браузера.
 - `npx vitest run`, `npm run lint`, `npm run build` зелёные; вид проверен в превью на событиях с картинкой и без.
+
+## Answer
+
+Реализовано 2026-09-22 через `superpowers:test-driven-development` (TDD для двух чистых функций, остальное — интеграция + превью, как и определял `Скилл:`).
+
+**Код:**
+- `web/lib/price.ts::priceBadge()` — бейдж из `price_min/price_max` (не `price_text`): `free`→«Бесплатно», `known` и `min=max`→«{цена} ₽», `known` с разбросом→«от {минимум} ₽», `unknown`→`null` (потребитель показывает сырой `priceText`). Тесты — `price.test.ts`.
+- `web/lib/eventTiming.ts` (новый файл) — `eventTimeStatus()` и `isAvailable()`, решение тикета 06: `live` только при надёжном `time_end` (источник `generic:filarmonia.online` явно исключён как ненадёжный — тикет 11) и попадании текущего момента в интервал; иначе по порогу 3 ч от `time_start` — `upcoming` («через N ч»), `started` не устаревшее («началось в HH:MM»), `started` устаревшее ≥3 ч («началось N ч назад», флаг `stale`). Не сегодня или нет `time_start` → `none`. Тесты — `eventTiming.test.ts`, 12 кейсов.
+- `web/lib/filters.ts` — `sortForDisplay()` (устаревшие сегодняшние уходят в конец дня, не скрываются) и `countAvailable()` (чипы дат считают «доступное» — решение 06, пункт 3). Тесты — `filters.test.ts`.
+- `web/components/EventCard.tsx` — первая строка через `timeLine()` (использует `eventTimeStatus`), цена — `priceBadge() ?? priceText`, приняты пропы `today`/`nowMinutes`.
+- `web/components/CardImage.tsx` — плейсхолдер без картинки получил плашку с ценой (`priceBadge() ?? priceText`) поверх градиента — тикет 13, вариант D.
+- `web/components/CityView.tsx` — `nowMinutes` считается как `today` (build-time дефолт через `getCityNowMinutes`, пересчёт на монтировании), `days` сортируется через `sortForDisplay`, `counts` — через `countAvailable`; пропы прокинуты через `SeriesGrid`/`DaySection`/`SearchResults`.
+
+**Проверка:** `npx vitest run` — 115/115 зелёных; `npm run lint` — 0 ошибок (1 предсуществующий warning в `layout.tsx`, не по теме); `npx tsc --noEmit` — чисто. `npm run build` не прошёл — сеть песочницы не достаёт до `fonts.gstatic.com` (Google Fonts), к правке не относится, тайпчек это покрывает. Превью на живом `/perm/` (`localhost:3000`, уже запущенный `next dev`): секция «Вт, 22 сентября» — карточки с «началось в HH:MM» идут первыми по времени, три «началось N ч назад» (10 ч, 4 ч, 4 ч) — в конце секции; чип «Сегодня» показывает 10 (без устаревших), секция — 13 (с ними). Бейджи цены: «600 ₽», «Бесплатно», сырой `priceText` («0 ₽», «по билетам», «добровольный взнос») для `unknown`. Плейсхолдер без картинки — эмодзи-градиент с плашкой цены снизу.
+
+**Вне scope, не проверено:** `priceBadge` с разбросом (`от N ₽`) не встретился в живых данных превью — проверен только юнит-тестом.

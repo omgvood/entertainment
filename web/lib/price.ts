@@ -24,3 +24,19 @@ export function priceKind(event: Pick<EventItem, "priceMax" | "priceText">): Pri
   if (event.priceMax > 0) return "known";
   return FREE_RE.test(event.priceText ?? "") ? "free" : "unknown";
 }
+
+/**
+ * Бейдж цены для карточки быстрого просмотра: короткая метка вместо сырого
+ * `priceText` («27900 руб.», «от 235.6 млн ₽»). `unknown` бейджа не даёт —
+ * потребитель показывает `priceText` как есть.
+ */
+export function priceBadge(
+  event: Pick<EventItem, "priceMin" | "priceMax" | "priceText">,
+): string | null {
+  const kind = priceKind(event);
+  if (kind === "free") return "Бесплатно";
+  if (kind === "unknown") return null;
+  return event.priceMin === event.priceMax
+    ? `${event.priceMin} ₽`
+    : `от ${event.priceMin} ₽`;
+}

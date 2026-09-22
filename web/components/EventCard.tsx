@@ -4,6 +4,8 @@ import { EVENT_TYPE_LABELS } from "@/lib/types";
 import { eventBadgeStyle, eventPlaceholder } from "@/lib/event-styles";
 import { CardImage } from "./CardImage";
 import { formatDayMonth } from "@/lib/dateUtil";
+import { priceBadge } from "@/lib/price";
+import { eventTimeStatus } from "@/lib/eventTiming";
 
 function formatDate(event: EventItem): string {
   if (event.date === "always") return "ежедневно";
@@ -11,10 +13,22 @@ function formatDate(event: EventItem): string {
   return event.timeStart ? `${day}, ${event.timeStart}` : day;
 }
 
+/** Первая строка карточки — решение тикета 06: относительная метка для сегодняшних событий. */
+function timeLine(event: EventItem, today: string, nowMinutes: number): string {
+  const status = eventTimeStatus(event, today, nowMinutes);
+  if (status.kind === "live") return "Идёт сейчас";
+  if (status.kind === "started") return status.label;
+  if (status.kind === "upcoming") return `${formatDate(event)} · ${status.label}`;
+  return formatDate(event);
+}
+
 interface EventCardProps {
   event: EventItem;
   /** Серия: сколько ещё дат и до какой — из lib/series.otherDates. */
   moreDates?: { count: number; lastDate: string } | null;
+  /** «Сегодня» и минуты от полуночи в таймзоне города — для timeLine (тикет 06). */
+  today: string;
+  nowMinutes: number;
 }
 
 function pluralDates(n: number): string {
@@ -26,8 +40,9 @@ function pluralDates(n: number): string {
   return "дат";
 }
 
-export function EventCard({ event, moreDates }: EventCardProps) {
+export function EventCard({ event, moreDates, today, nowMinutes }: EventCardProps) {
   const placeholder = eventPlaceholder(event.type);
+  const badge = priceBadge(event);
 
   return (
     <Link
@@ -39,6 +54,7 @@ export function EventCard({ event, moreDates }: EventCardProps) {
           imageUrl={event.imageUrl}
           alt={`${event.title} — ${EVENT_TYPE_LABELS[event.type]} в ${event.venueName}`}
           placeholder={placeholder}
+          priceLabel={badge ?? event.priceText}
         />
       </div>
 
@@ -76,7 +92,7 @@ export function EventCard({ event, moreDates }: EventCardProps) {
 
         <div className="flex flex-col gap-1 text-[12.5px] text-muted mt-auto">
           <span>
-            📅 {formatDate(event)}
+            📅 {timeLine(event, today, nowMinutes)}
             {moreDates && (
               <small className="ml-1 text-[11px] text-accent-cyan">
                 · ещё {moreDates.count} {pluralDates(moreDates.count)} до {formatDayMonth(moreDates.lastDate)}
@@ -84,7 +100,7 @@ export function EventCard({ event, moreDates }: EventCardProps) {
             )}
           </span>
           <span>
-            💰 {event.priceText}
+            💰 {badge ?? event.priceText}
             {event.priceNote && (
               <small className="ml-1 text-[11px] opacity-85">
                 {event.priceNote}

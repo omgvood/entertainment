@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { priceKind } from "./price";
+import { priceBadge, priceKind } from "./price";
 
 const ev = (priceMax: number, priceText: string) => ({ priceMax, priceText });
+const badgeEv = (priceMin: number, priceMax: number, priceText: string) => ({
+  priceMin,
+  priceMax,
+  priceText,
+});
 
 describe("priceKind", () => {
   it.each([
@@ -36,5 +41,23 @@ describe("priceKind", () => {
 
   it("не падает на null из БД", () => {
     expect(priceKind(ev(0, null as unknown as string))).toBe("unknown");
+  });
+});
+
+describe("priceBadge", () => {
+  it("бесплатное событие даёт «Бесплатно»", () => {
+    expect(priceBadge(badgeEv(0, 0, "Бесплатно"))).toBe("Бесплатно");
+  });
+
+  it("известная одна цена без разброса — «{цена} ₽»", () => {
+    expect(priceBadge(badgeEv(600, 600, "600 ₽"))).toBe("600 ₽");
+  });
+
+  it("известная цена с разбросом — «от {минимум} ₽»", () => {
+    expect(priceBadge(badgeEv(440, 700, "от 440 до 700 ₽"))).toBe("от 440 ₽");
+  });
+
+  it("неизвестная цена — нет бейджа (null)", () => {
+    expect(priceBadge(badgeEv(0, 0, "по билетам"))).toBeNull();
   });
 });

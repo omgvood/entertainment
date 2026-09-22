@@ -4,17 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import type { City, EventItem, VenueItem } from "@/lib/types";
 import { CITY_CONFIG } from "@/lib/types";
 import {
+  countAvailable,
   DEFAULT_FILTERS,
+  sortForDisplay,
   typesByFrequency,
   visibleSeries,
   type DateSel,
   type Filters,
   type SeriesView,
 } from "@/lib/filters";
-import { compareByDateTime, groupByDate, groupSeries, otherDates } from "@/lib/series";
+import { groupByDate, groupSeries, otherDates } from "@/lib/series";
 import { buildDateStrip, firstNonEmptyDay, type StripItem } from "@/lib/dateStrip";
 import { listStateKey, parseState, serializeState } from "@/lib/urlState";
-import { formatWeekdayDayMonth, getCityToday } from "@/lib/dateUtil";
+import { formatWeekdayDayMonth, getCityNowMinutes, getCityToday } from "@/lib/dateUtil";
 import { FilterBar } from "./FilterBar";
 import { DateStrip } from "./DateStrip";
 import { EventCard } from "./EventCard";
@@ -33,6 +35,8 @@ interface CityViewProps {
 
 export function CityView({ events, venues, city, today: buildToday }: CityViewProps) {
   const [today, setToday] = useState(buildToday);
+  /** Минуты от полуночи в таймзоне города — как today, посчитаны при сборке и пересчитаны после монтирования. */
+  const [nowMinutes, setNowMinutes] = useState(() => getCityNowMinutes(city));
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
   // Статический HTML один на все query-строки, поэтому URL читается только
@@ -48,6 +52,7 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
     const liveToday = getCityToday(city);
     const initial = parseState(window.location.search, liveToday);
     setToday(liveToday);
+    setNowMinutes(getCityNowMinutes(city));
     setFilters(initial.filters);
     setQuery(initial.query);
     setUrlRead(true);
@@ -95,9 +100,9 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
   const counts = useMemo(
     () =>
       new Map<DateSel, number>(
-        strip.map((item) => [item.sel, visibleSeries(series, filters, item.sel, today).length]),
+        strip.map((item) => [item.sel, countAvailable(series, filters, item.sel, today, nowMinutes)]),
       ),
-    [strip, series, filters, today],
+    [strip, series, filters, today, nowMinutes],
   );
 
   /* eslint-disable react-hooks/set-state-in-effect -- умолчание фиксируется один раз, иначе смена типа молча перескакивала бы на другой день */
@@ -109,11 +114,9 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
   const selected: DateSel = filters.date ?? autoDate ?? "today";
 
   const days = useMemo(() => {
-    const views = visibleSeries(series, filters, selected, today).sort((a, b) =>
-      compareByDateTime(a.shown, b.shown),
-    );
+    const views = sortForDisplay(visibleSeries(series, filters, selected, today), today, nowMinutes);
     return groupByDate(views, (v) => v.shown.date);
-  }, [series, filters, selected, today]);
+  }, [series, filters, selected, today, nowMinutes]);
 
   // Порог в 2 символа плюс проверка на осмысленность: запрос «куда сходить»
   // состоит из одних стоп-слов, терминов не даёт, и показывать по нему
@@ -185,6 +188,8 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
           hiddenByFilters={hitSeries.length - searchViews.length}
           onResetFilters={resetFilters}
           onClearQuery={() => setQuery("")}
+          today={today}
+          nowMinutes={nowMinutes}
         />
       ) : days.length === 0 ? (
         <EmptyState
@@ -197,7 +202,7 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
         />
       ) : (
         days.map((day) => (
-          <DaySection key={day.date} date={day.date} views={day.items} />
+          <DaySection key={day.date} date={day.date} views={day.items} today={today} nowMinutes={nowMinutes} />
         ))
       )}
 
@@ -217,17 +222,33 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
   );
 }
 
-function SeriesGrid({ views }: { views: SeriesView[] }) {
+function SeriesGrid({ views, today, nowMinutes }: { views: SeriesView[]; today: string; nowMinutes: number }) {
   return (
     <div className="grid gap-5 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
       {views.map((v) => (
-        <EventCard key={v.series.key} event={v.shown} moreDates={otherDates(v.series, v.shown)} />
+        <EventCard
+          key={v.series.key}
+          event={v.shown}
+          moreDates={otherDates(v.series, v.shown)}
+          today={today}
+          nowMinutes={nowMinutes}
+        />
       ))}
     </div>
   );
 }
 
-function DaySection({ date, views }: { date: string; views: SeriesView[] }) {
+function DaySection({
+  date,
+  views,
+  today,
+  nowMinutes,
+}: {
+  date: string;
+  views: SeriesView[];
+  today: string;
+  nowMinutes: number;
+}) {
   return (
     <section>
       <div className="flex items-baseline gap-3 mb-[18px]">
@@ -236,7 +257,7 @@ function DaySection({ date, views }: { date: string; views: SeriesView[] }) {
           {views.length} {pluralEvents(views.length)}
         </span>
       </div>
-      <SeriesGrid views={views} />
+      <SeriesGrid views={views} today={today} nowMinutes={nowMinutes} />
     </section>
   );
 }
@@ -302,6 +323,8 @@ function SearchResults({
   hiddenByFilters,
   onResetFilters,
   onClearQuery,
+  today,
+  nowMinutes,
 }: {
   views: SeriesView[];
   venues: VenueItem[];
@@ -309,6 +332,8 @@ function SearchResults({
   hiddenByFilters: number;
   onResetFilters: () => void;
   onClearQuery: () => void;
+  today: string;
+  nowMinutes: number;
 }) {
   if (views.length === 0 && venues.length === 0) {
     return (
@@ -350,7 +375,7 @@ function SearchResults({
               {views.length} {pluralEvents(views.length)}
             </span>
           </div>
-          <SeriesGrid views={views} />
+          <SeriesGrid views={views} today={today} nowMinutes={nowMinutes} />
           {hiddenByFilters > 0 && (
             <p className="mt-4 text-[13px] text-muted">
               Ещё {hiddenByFilters} {pluralEvents(hiddenByFilters)} скрыто фильтрами ·{" "}
