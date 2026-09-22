@@ -14,9 +14,11 @@ interface CardImageProps {
   imageUrl?: string;
   alt: string;
   placeholder: { gradient: string; emoji: string };
+  /** Цена поверх плейсхолдера, когда картинки нет — тикет 13, вариант D. */
+  priceLabel?: string;
 }
 
-export function CardImage({ imageUrl, alt, placeholder }: CardImageProps) {
+export function CardImage({ imageUrl, alt, placeholder, priceLabel }: CardImageProps) {
   const [errored, setErrored] = useState(false);
 
   if (!isUsableImage(imageUrl) || errored) {
@@ -26,6 +28,11 @@ export function CardImage({ imageUrl, alt, placeholder }: CardImageProps) {
         aria-hidden
       >
         {placeholder.emoji}
+        {priceLabel && (
+          <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[11.5px] font-semibold text-white/90 bg-black/35 px-3 py-1 rounded-full line-clamp-1 max-w-[90%]">
+            {priceLabel}
+          </span>
+        )}
       </div>
     );
   }

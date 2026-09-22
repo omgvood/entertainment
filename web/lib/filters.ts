@@ -8,6 +8,8 @@ import type { EventItem, EventType } from "./types";
 import type { EventSeries } from "./series";
 import { addDaysUTC, weekdayUTC } from "./dateUtil";
 import { priceKind } from "./price";
+import { compareByDateTime } from "./series";
+import { isAvailable } from "./eventTiming";
 
 /** Выбор в ленте дат; кроме именованных — конкретный день `YYYY-MM-DD`. */
 export type DateSel = "today" | "tomorrow" | "weekend" | "all" | (string & {});
@@ -139,4 +141,39 @@ export function visibleSeries(
     if (shown) views.push({ series: s, shown });
   }
   return views;
+}
+
+/**
+ * Порядок для отображения: как visibleSeries, но начавшиеся ≥3 ч назад события
+ * сегодняшнего дня уходят в конец (решение тикета 06, пункт 2) — не скрываются,
+ * только теряют место в начале списка. Другие дни не затрагиваются:
+ * isAvailable для них всегда true.
+ */
+export function sortForDisplay(
+  views: SeriesView[],
+  today: string,
+  nowMinutes: number,
+): SeriesView[] {
+  return [...views].sort((a, b) => {
+    const staleA = isAvailable(a.shown, today, nowMinutes) ? 0 : 1;
+    const staleB = isAvailable(b.shown, today, nowMinutes) ? 0 : 1;
+    if (staleA !== staleB) return staleA - staleB;
+    return compareByDateTime(a.shown, b.shown);
+  });
+}
+
+/**
+ * Счётчик чипов дат: как visibleSeries, но не считает события, начавшиеся
+ * ≥3 ч назад сегодня (решение тикета 06, пункт 3 — «доступное»). Сами события
+ * из ленты не пропадают, только из числа.
+ */
+export function countAvailable(
+  series: EventSeries[],
+  filters: Filters,
+  sel: DateSel,
+  today: string,
+  nowMinutes: number,
+): number {
+  return visibleSeries(series, filters, sel, today).filter((v) => isAvailable(v.shown, today, nowMinutes))
+    .length;
 }

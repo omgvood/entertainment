@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_FILTERS, inDateSel, matchesEvent, visibleSeries } from "./filters";
+import { countAvailable, DEFAULT_FILTERS, inDateSel, matchesEvent, sortForDisplay, visibleSeries } from "./filters";
 import { groupSeries } from "./series";
 import type { EventItem, EventType } from "./types";
 
@@ -108,5 +108,42 @@ describe("visibleSeries", () => {
   it("серия не видна, если ни один сеанс не попал в окно и фильтры", () => {
     const paid = { ...DEFAULT_FILTERS, priceMin: 500 };
     expect(visibleSeries(series, paid, "2026-09-20", "2026-09-19")).toEqual([]);
+  });
+});
+
+describe("sortForDisplay", () => {
+  const TODAY = "2026-09-22";
+
+  it("начавшиеся ≥3 ч назад сегодня уходят в конец дня, порядок остальных не меняется", () => {
+    const series = groupSeries([
+      mk({ slug: "stale", title: "Событие А", date: TODAY, timeStart: "15:00" }), // началось 4 ч назад
+      mk({ slug: "later", title: "Событие Б", date: TODAY, timeStart: "20:00" }),
+      mk({ slug: "soon", title: "Событие В", date: TODAY, timeStart: "19:30" }),
+    ]);
+    const views = visibleSeries(series, DEFAULT_FILTERS, "all", TODAY);
+    const sorted = sortForDisplay(views, TODAY, 19 * 60);
+    expect(sorted.map((v) => v.shown.slug)).toEqual(["soon", "later", "stale"]);
+  });
+
+  it("не трогает порядок дней, не являющихся сегодня", () => {
+    const series = groupSeries([
+      mk({ slug: "tomorrow", title: "Событие А", date: "2026-09-23", timeStart: "10:00" }),
+      mk({ slug: "today", title: "Событие Б", date: TODAY, timeStart: "10:00" }),
+    ]);
+    const views = visibleSeries(series, DEFAULT_FILTERS, "all", TODAY);
+    const sorted = sortForDisplay(views, TODAY, 9 * 60);
+    expect(sorted.map((v) => v.shown.slug)).toEqual(["today", "tomorrow"]);
+  });
+});
+
+describe("countAvailable", () => {
+  it("не считает начавшиеся ≥3 ч назад сегодня, но не убирает их из visibleSeries", () => {
+    const TODAY = "2026-09-22";
+    const series = groupSeries([
+      mk({ slug: "stale", title: "Событие А", date: TODAY, timeStart: "15:00" }),
+      mk({ slug: "fresh", title: "Событие Б", date: TODAY, timeStart: "20:00" }),
+    ]);
+    expect(visibleSeries(series, DEFAULT_FILTERS, "all", TODAY)).toHaveLength(2);
+    expect(countAvailable(series, DEFAULT_FILTERS, "all", TODAY, 19 * 60)).toBe(1);
   });
 });
