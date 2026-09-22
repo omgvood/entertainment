@@ -71,16 +71,34 @@ function rowToEvent(r: EventRow): EventItem {
   };
 }
 
+/**
+ * Обрывы соединения до Supabase (ECONNRESET) на dev-машине случаются
+ * нерегулярно и не воспроизводятся на проде — на повторном запросе проходят.
+ */
+async function withRetry<T>(
+  query: () => PromiseLike<{ data: T | null; error: { message: string } | null }>,
+  attempts = 3
+): Promise<{ data: T | null; error: { message: string } | null }> {
+  let result = await query();
+  for (let i = 1; i < attempts && result.error; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 500 * i));
+    result = await query();
+  }
+  return result;
+}
+
 export async function getEventsByCity(city: City, today: string): Promise<EventItem[]> {
   // .neq('always') обязателен: в строковом сравнении Postgres 'always' >= 'YYYY-MM-DD' = TRUE,
   // т.е. .gte сам по себе always-строки НЕ отсекает. Площадки живут в таблице venues, не в сетке.
-  const { data, error } = await supabase
-    .from("events")
-    .select("*")
-    .eq("city", city)
-    .neq("date", "always")
-    .gte("date", today)
-    .order("date", { ascending: true });
+  const { data, error } = await withRetry(() =>
+    supabase
+      .from("events")
+      .select("*")
+      .eq("city", city)
+      .neq("date", "always")
+      .gte("date", today)
+      .order("date", { ascending: true })
+  );
 
   if (error) {
     throw new Error(`Не удалось загрузить события для ${city}: ${error.message}`);
@@ -93,12 +111,9 @@ export async function getEventBySlug(
   city: City,
   slug: string
 ): Promise<EventItem | null> {
-  const { data, error } = await supabase
-    .from("events")
-    .select("*")
-    .eq("city", city)
-    .eq("slug", slug)
-    .maybeSingle();
+  const { data, error } = await withRetry(() =>
+    supabase.from("events").select("*").eq("city", city).eq("slug", slug).maybeSingle()
+  );
 
   if (error) {
     throw new Error(`Не удалось загрузить событие ${slug}: ${error.message}`);
