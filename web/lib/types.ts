@@ -60,6 +60,7 @@ export interface EventItem {
   slug: string;
   title: string;
   type: EventType;
+  /** Свободный текст от LLM, без словаря — не опора для фильтров (README, п. 14). */
   category?: string;
   date: EventDate;
   timeStart?: string; // "HH:MM"
