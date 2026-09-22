@@ -12,6 +12,10 @@ param(
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# Текущий каталог вызова непредсказуем (сессия могла cd'нуться куда угодно),
+# а все git-команды ниже полагаются на то, что cwd — внутри репозитория.
+Set-Location (Split-Path -Parent $PSScriptRoot)
+
 # Stop-хук вызывается повторно после того, как сессия отреагировала на
 # замечание. Без этой проверки получается цикл.
 $stdin = [Console]::In.ReadToEnd()
