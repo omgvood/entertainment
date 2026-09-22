@@ -2,8 +2,9 @@
 
 Type: grilling
 Скилл: superpowers:brainstorming — выбор между порогом парсера и ключом серии на фронте
-Status: backlog
+Status: open
 Blocked by: —
+Волна: 4 (открыта 2026-09-22)
 
 ## Question
 

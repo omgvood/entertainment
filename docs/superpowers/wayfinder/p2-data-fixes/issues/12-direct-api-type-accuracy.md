@@ -2,9 +2,10 @@
 
 Type: research
 Скилл: mattpocock-skills:research — сверка с сайтами источников
-Status: backlog
+Status: open
 Blocked by: —
 Ветка: `research/direct-api-types`
+Волна: 4 (открыта 2026-09-22)
 
 ## Question
 
