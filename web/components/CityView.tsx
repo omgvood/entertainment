@@ -193,6 +193,7 @@ export function CityView({ events, venues, city, today: buildToday }: CityViewPr
           onPick={(sel) => setFilters({ ...filters, date: sel })}
           showReset={filtersChanged}
           onReset={resetFilters}
+          cityEmpty={suggestion === null && liveEvents.length === 0}
         />
       ) : (
         days.map((day) => (
@@ -246,19 +247,25 @@ function EmptyState({
   onPick,
   showReset,
   onReset,
+  cityEmpty,
 }: {
   suggestion: StripItem | null;
   suggestionCount: number;
   onPick: (sel: DateSel) => void;
   showReset: boolean;
   onReset: () => void;
+  cityEmpty: boolean;
 }) {
   return (
     <div className="bg-surface border border-border rounded-xl p-10 text-center">
-      <p className="text-lg font-semibold mb-2">На эту дату ничего не нашлось</p>
-      <p className="text-sm text-muted mb-5">
-        Выберите другой день в ленте выше{showReset ? " или сбросьте фильтры по типу и цене" : ""}.
+      <p className="text-lg font-semibold mb-2">
+        {cityEmpty ? "В городе пока нет событий" : "На эту дату ничего не нашлось"}
       </p>
+      {!cityEmpty && (
+        <p className="text-sm text-muted mb-5">
+          Выберите другой день в ленте выше{showReset ? " или сбросьте фильтры по типу и цене" : ""}.
+        </p>
+      )}
       <div className="flex gap-2 justify-center flex-wrap">
         {suggestion && (
           <button
