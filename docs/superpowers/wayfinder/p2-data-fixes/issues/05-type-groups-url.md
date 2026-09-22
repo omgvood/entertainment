@@ -4,6 +4,7 @@ Type: grilling
 Скилл: superpowers:brainstorming — решение меняет URL и набор чипов, нужны варианты с ценой ошибки
 Status: resolved
 Blocked by: —
+Код-тикет: `docs/superpowers/wayfinder/p7-ui-ux-pass/issues/05-type-groups-code.md`
 
 ## Question
 

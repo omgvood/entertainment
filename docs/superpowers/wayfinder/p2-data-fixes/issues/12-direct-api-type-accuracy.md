@@ -6,6 +6,7 @@ Status: open
 Blocked by: —
 Ветка: `research/direct-api-types`
 Волна: 4 (открыта 2026-09-22)
+Код-тикет: `docs/superpowers/wayfinder/p8-parser-decisions-code/issues/01-direct-api-type-mapper.md`
 
 ## Question
 

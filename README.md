@@ -132,6 +132,7 @@ Vercel CDN ← пользователь
 | **Таймзона города на фронте** | «Сегодня» считается в таймзоне города (`getCityToday`), а не в UTC сервера сборки — билд идёт в 21:00 UTC, из-за чего дата уезжала на сутки. Дальше эта строка передаётся вниз пропом, а вся арифметика дат идёт над строками `YYYY-MM-DD` через UTC-компоненты — группировка по дням и лента дат не зависят от таймзоны браузера | `lib/dateUtil.getCityToday`, `lib/dateUtil.ts` |
 | **Fuzzy-дедуп (Dedup v2)** | Write-time guard: событие, уже записанное под другой формулировкой названия («Квиз в баре» / «Квиз-вечер в баре»), не получает вторую карточку. Скорер `max(посимвольное, вложенность токенов, Jaccard)` × множитель за площадку, жёсткий guard по `time_start`, кластеризация union-find (транзитивность: A~B~C при A≁C — один кластер). Порог `≥0.95` — автослияние, `0.75–0.95` — запись в `dedup_candidates` без слияния (материал для калибровки и `dedup-backfill`). **Три guard'а против ложных слияний**, откалиброванных на живых карточках Перми: перечень (`Мастер-классы: «Единорог», «Планета», «Ёжик»` — не дубль каждого из МК), зонтичная программа (`День Строгановых` — не дубль своих подсобытий) и самодубли источника (`distinct_events`: две игры QuizPlease в одном зале в одно время — разные игры) | `fuzzy.py`, `merge.fuzzy_merge`, таблица `dedup_candidates`, команда `dedup-backfill` |
 | **Лента дат и серии** | Главная показывала «Сегодня / Завтра / Дальше» на 400+ карточек разом, повторы одного события на разные даты (выставки, регулярные экскурсии) шли отдельными карточками, клик по чипу типа снимал его вместо того, чтобы оставить только выбранный, а фильтры терялись при переходе на страницу события и обратно. Теперь: лента дат (Сегодня/Завтра/Выходные/14 дней/Все даты) по умолчанию показывает один день (20–60 карточек); повторы одного события схлопнуты в одну карточку серии (`lib/series.ts`, ключ «название | площадка») с подписью «ещё N дат»; пустой выбор типов = все типы, клик оставляет только выбранный; состояние (дата/тип/цена/поиск) живёт в URL (`lib/urlState.ts`) и `sessionStorage`, поэтому переход на страницу события и «← Все события» назад не сбрасывает фильтры; страница события показывает «Другие даты» серии (`OtherDates.tsx`, `lib/events.getSeriesSiblings`) | `lib/series.ts`, `lib/filters.ts`, `lib/dateStrip.ts`, `lib/urlState.ts`, `components/DateStrip.tsx`, `components/OtherDates.tsx`, `components/BackLink.tsx` |
+| **Карточка быстрого просмотра (статус времени)** | Для событий сегодняшнего дня карточка и лента дат показывают метку по времени: «идёт сейчас» (между `time_start` и `time_end`), «через N ч» (ещё не началось) или «началось в HH:MM» / «началось N ч назад» (стартовало, но `time_end` неизвестен/ненадёжен). Порог «свежести» — 3 часа от `time_start`, дальше статус помечается `stale`. Событие с истёкшим статусом не пропадает из ленты, но не считается в счётчике чипа даты (`isAvailable`). Источник `generic:filarmonia.online` исключён из доверия к `time_end` — у него `endDate` всегда шаблонно равен `startDate + 180 мин` | `lib/eventTiming.ts` (`eventTimeStatus`, `isAvailable`), `lib/dateUtil.getCityNowMinutes`, `components/EventCard.tsx`, `components/CityView.tsx`, `lib/filters.ts` |
 
 Детали по каждому модулю — ниже в разделах «Парсер» и «Модель данных».
 
@@ -204,6 +205,7 @@ entertainment/
 │   │   ├── test_kudago.py          — KudaGoClient (маппинг категорий)
 │   │   ├── test_merge.py           — merge_rows (priority, enrichment, near_misses) + fuzzy_merge
 │   │   ├── test_candidate_sources.py — поисковые провайдеры, circuit breaker, суффиксный фильтр доменов, авто-апрув
+│   │   ├── test_config.py          — load_seeds: distinct_events и другие поля SourceConfig из seeds.yaml
 │   │   ├── test_permm.py           — ПЕРММ: маппинг /json/* → ParsedEvent (фикстуры, без сети)
 │   │   ├── test_permopera.py       — Театр оперы: разбор HTML-в-JSON афиши (фикстура)
 │   │   ├── test_playwright_2gis.py — parse_cards (HTML-фикстура, без браузера/сети)
@@ -213,7 +215,8 @@ entertainment/
 │   │   ├── test_timepad.py         — TimepadClient._map_category, пагинация
 │   │   ├── test_url_utils.py       — resolve_event_url (относит./мусор/поддомены/фолбэк)
 │   │   ├── test_validator.py       — to_event_row, slug, fingerprint, to_venue, усечение title/description
-│   │   └── test_vk.py              — VkClient, event_group_to_parsed, fetch_wall_posts
+│   │   ├── test_vk.py              — VkClient, event_group_to_parsed, fetch_wall_posts
+│   │   └── fixtures/               — сырые JSON-фикстуры direct_api (permm_events.json, permm_exhibitions.json, permopera_playbill.json)
 │   ├── pyproject.toml              — зависимости и настройки пакета
 │   └── README.md                   — документация парсера
 │
@@ -260,7 +263,8 @@ entertainment/
 │   │   ├── venue-meta.ts           — SEO-хелперы площадок (metadata, JSON-LD, род. падеж города)
 │   │   ├── venue-styles.ts         — стили карточек/бейджей по типу площадки
 │   │   ├── event-styles.ts         — неоновые бейджи и градиенты-плейсхолдеры по EventType
-│   │   ├── dateUtil.ts             — арифметика календарных дат в UTC (addDaysUTC, formatDayMonth), форматтеры дня недели (formatStripDay, formatWeekdayDayMonth), getCityToday
+│   │   ├── dateUtil.ts             — арифметика календарных дат в UTC (addDaysUTC, formatDayMonth), форматтеры дня недели (formatStripDay, formatWeekdayDayMonth), getCityToday, getCityNowMinutes
+│   │   ├── eventTiming.ts          — статус времени события сегодня (live/upcoming/started), eventTimeStatus, isAvailable
 │   │   ├── series.ts               — группировка повторов события в серии (seriesKey, groupSeries, otherDates, groupByDate)
 │   │   ├── dateStrip.ts            — пункты ленты дат и выбор ближайшего непустого дня
 │   │   ├── urlState.ts             — состояние главной в URL (?date=&type=&pmin=&pmax=&q=) и ключ sessionStorage
@@ -279,15 +283,22 @@ entertainment/
 │   ├── backup_venues.yml           — еженедельный снимок venues в git (бекап)
 │   └── refresh_venues.yml          — сбор venues из 2ГИС раз в 2 недели (API / Playwright fallback)
 │
-├── input-output/                   — образцы JSON/xlsx/yaml, PDF-экспорт readme, ключи SSH
 ├── prototype/                      — статические UI-макеты (HTML/CSS/JS, вне сборки)
 │   ├── sprint-0/                   — первый прототип (светлая тема)
-│   └── redesign/                   — интерактивный макет редизайна (светлая тема, фиолетовый акцент)
-└── docs/
-    ├── Конвертер yaml-xlsx/        — утилиты seeds.yaml ↔ Excel
-    │   ├── make_seeds_excel.py     — генерирует seeds_editor.xlsx из seeds.yaml (openpyxl)
-    │   └── excel_to_seeds.py       — конвертирует seeds_editor.xlsx обратно в seeds.yaml
-    └── Условия бесплатного использования API Яндекс.md
+│   ├── redesign/                   — интерактивный макет редизайна (светлая тема, фиолетовый акцент)
+│   └── redesign-neon/              — макет неонового редизайна (текущая тема фронта)
+└── docs/                           — трекается частично, см. docs/agents/skills-routing.md
+    ├── agents/                     — правила агента и разбор их происхождения
+    │   ├── skills-routing.md       — таблица «тип задачи → скилл → куда сохранять артефакты»
+    │   ├── session-protocol.md     — порядок работы сессии (сверка репо, размер волны, чек-лист)
+    │   └── process-journal.md      — журнал инцидентов, из которых выросли правила
+    ├── superpowers/                — результаты работы скиллов superpowers
+    │   ├── specs/                  — архитектурные спеки (`brainstorming` architectural)
+    │   ├── plans/                  — планы реализации (`writing-plans`)
+    │   └── wayfinder/              — карты эффортов и тикеты (`mattpocock-skills:wayfinder`)
+    ├── research/                   — выкладки скилла `research` с цитатами первоисточника
+    └── personal/                   — личные заметки, не трекается (.gitignore): конвертер seeds↔xlsx,
+                                       заметки по Playwright, условия API Яндекс, черновики идей
 ```
 
 ---
@@ -304,7 +315,11 @@ entertainment/
 |---------|-----------|
 | `discover` | Только discovery без LLM и записи в БД. Используется для отладки краулеров |
 | `discover-sources` | Discovery новых источников: поиск → скоринг → `candidate_sources` (раз в неделю). Exit 1, если все keyed-провайдеры (Serper/Brave) отключились по авторизации |
+| `discovery-health --city <c> [--days N]` | Здоровье Discovery: число новых кандидатов за окно (дефолт 7 дней), разбивка по провайдеру/статусу. Exit 1 при 0 новых — сигнал деградации поиска |
 | `run` | Полный пайплайн: discovery → dedup → LLM-извлечение → валидация → запись в БД. При предупреждениях источников пишет `parse_warnings_<city>.json` для GHA-алерта |
+| `refresh-venues --city <c\|all> [--source auto\|twogis\|playwright]` | Сбор постоянных заведений в таблицу `venues`: 2ГИС Catalog API, с fallback на Playwright при `auto` |
+| `sync-venues --city <c\|all> [--force]` | Пересборка `venues` из `events(date='always', source LIKE 'twogis-%')`. Safe-by-default: без `--force` — dry-run |
+| `export-venues [--city] [--output <path>]` | Снимок таблицы `venues` → SQL-файл (дефолт `supabase/seeds/venues.sql`) для бекапа в git |
 | `dedup-backfill --city <slug> [--threshold] [--apply]` | Разбор уже накопленных fuzzy-дублей (см. «`fuzzy.py` + `merge.fuzzy_merge`»). Safe-by-default: без `--apply` только печать кластеров |
 
 **Флаги:**
@@ -347,11 +362,13 @@ entertainment/
   Исключение — исчерпанная суточная квота (`is_daily_quota_exhausted`): она не восстановится за
   время ретрая, поэтому пробрасывается сразу, без повторов, к следующему провайдеру
 - `GEMINI_MODEL`, `GROQ_MODEL`, `DEEPSEEK_MODEL` — модели провайдеров
+- `LOG_LEVEL` (дефолт `INFO`) — уровень логирования structlog
 
 **`SourceConfig`** — конфигурация одного источника из `seeds.yaml`:
 - `name` — уникальное имя источника
 - `extraction_mode` — `per_url` / `batch_listing` / `playwright_listing` / `direct_api` / `vk_events` / `vk_posts` / `telegram_posts` / `generic`
 - `priority` — приоритет источника при кросс-источниковом merge (выше — побеждает), дефолт `0`
+- `enabled` — `true` по умолчанию; `false` исключает источник из прогона без удаления записи из `seeds.yaml`
 - `full_snapshot` — `true` если один вызов гарантированно возвращает **все** будущие события источника. Включает `sync_source_events` — автоудаление отменённых событий. Устанавливать только при уверенности в полноте: для `batch_listing` с пагинацией/lazy-loading и для `vk_posts`/`telegram_posts`/`generic` — **не устанавливать**
 - `distinct_events` — `true`, если одна строка источника всегда одно событие (у каждой игры QuizPlease свой id). Запрещает fuzzy-слою сливать две строки этого источника между собой. Не путать с `full_snapshot` (полнота среза для синхронизации отмен): `permm` — `full_snapshot`, но не `distinct_events`, потому что склеивает два JSON-эндпоинта и один экспонат приходит дважды
 - Для `per_url`/`batch_listing`: `kind` (listing/sitemap), `url`, `url_pattern` (regex)
@@ -670,7 +687,7 @@ LLM-экстракторы получают список разрешённых 
 - **Без удалений** — все слитые строки делят `id`, upsert по `slug` перезаписывает на месте.
 - **Чистые функции** — без обращения к БД, тестируются изолированно (`tests/test_merge.py`).
 
-Приоритеты в `seeds.yaml`: `timepad` 100, `vk-events` 80, `twogis-*` 70, `quizplease` 60, `telegram-posts` 45, `vk-posts` 40, `generic` 20.
+Приоритеты в `seeds.yaml`: `timepad` 100, `vk-events` 80, `twogis-*` 70, `quizplease` 60, `permopera`/`permm` 55, `telegram-posts` 45, `vk-posts` 40, `generic` 20.
 
 ---
 
@@ -1329,10 +1346,10 @@ ORDER BY score DESC LIMIT GENERIC_DOMAIN_BUDGET (дефолт 20)
 
 #### Сравнительная таблица
 
-| Параметр | Gemini 2.5 Flash | Groq gpt-oss-120b | DeepSeek V4 Flash |
+| Параметр | Gemini 2.5 Flash-Lite | Groq gpt-oss-120b | DeepSeek V4 Flash |
 |----------|-----------------|-------------------|------------------|
 | SDK | `google-genai` | `groq` | `openai` (OpenRouter) |
-| Модель по умолчанию | `gemini-2.5-flash` | `openai/gpt-oss-120b` | `deepseek/deepseek-v4-flash` |
+| Модель по умолчанию | `gemini-2.5-flash-lite` | `openai/gpt-oss-120b` | `deepseek/deepseek-v4-flash` |
 | Base URL | Google AI API | api.groq.com | openrouter.ai/api/v1 |
 | Structured output | ✅ нативный (`response_schema`) | ❌ только `json_object` | ❌ нет |
 | Схема в промпте | не нужна (SDK принудит) | нужна (полный JSON Schema) | нужна (полный JSON Schema) |
@@ -1402,9 +1419,8 @@ ORDER BY score DESC LIMIT GENERIC_DOMAIN_BUDGET (дефолт 20)
 > на free-tier имеет TPM=8000, и batch-вызов почти всегда упирается в этот лимит (`413 … TPM`):
 > фиксированный оверхед (system-промпт ~2k + `max_tokens`) сам близок к 8000, размер входа тут ни
 > при чём. Поэтому такой 413 относится к rate-limit (`is_rate_limit`) → ретрай/фолбэк на Gemini, а
-> не теряется как контент-ошибка. Single-extract на Groq укладывается. Gemini 2.5-flash free-tier
+> не теряется как контент-ошибка. Single-extract на Groq укладывается. Gemini 2.5-flash-lite free-tier
 > ограничен по RPD — на тяжёлом прогоне выгорает за день.
-> Gemini 2.5-flash free-tier ограничен по RPD — на тяжёлом прогоне выгорает за день.
 
 #### Системный промпт (общий для всех провайдеров)
 
@@ -1722,9 +1738,9 @@ City ID определяется один раз из `api.quizplease.ru/api/cit
 
 ---
 
-## Утилиты (`docs/`)
+## Утилиты (`docs/personal/`)
 
-### `docs/Конвертер yaml-xlsx/` — редактор seeds.yaml в Excel
+### `docs/personal/Конвертер yaml-xlsx/` — редактор seeds.yaml в Excel
 
 Инструменты для удобного редактирования `parser/config/seeds.yaml` через Excel:
 
@@ -1751,21 +1767,26 @@ City ID определяется один раз из `api.quizplease.ru/api/cit
 **Шаги каждой джобы:**
 1. Checkout кода
 2. Python 3.12 с кэшем pip
-3. `pip install -e .` из `parser/`
-4. `python -m parser.cli run --city {city}` с секретами из env
-5. **Send warning alert** (`if: success()`): если прогон формально успешен, но отдельный
+3. `pip install -e '.[playwright]'` из `parser/` — базовые зависимости + опциональная группа `playwright`
+   (ни один активный источник её сейчас не использует, но ставится заранее — источник на
+   `playwright_listing` можно включить без правки workflow)
+4. **Cache Playwright browsers** — кэш `~/.cache/ms-playwright` по хешу `pyproject.toml` (переустановка
+   Chromium только при смене версии playwright, не на каждый прогон)
+5. **Install Playwright Chromium** — `playwright install chromium --with-deps`
+6. `python -m parser.cli run --city {city}` с секретами из env
+7. **Send warning alert** (`if: success()`): если прогон формально успешен, но отдельный
    источник упал на авторизации (напр. протух `TIMEPAD_TOKEN` → HTTP 403), парсер пишет
    `parse_warnings_<city>.json` в `GITHUB_WORKSPACE`. Шаг читает его и шлёт Telegram через
    `scripts/notify_warnings.py`. Иначе такой сбой невидим: джоба зелёная, событий нет.
-6. **Notify on failure** (`if: failure()`): Telegram-уведомление при падении всей джобы.
+8. **Notify on failure** (`if: failure()`): Telegram-уведомление при падении всей джобы.
 
 **После успеха:** отправляет POST на `VERCEL_DEPLOY_HOOK` → сайт пересобирается.  
 Деплой триггерится при частичном успехе (хотя бы один город прошёл).
 
 **Почему два механизма алертов?** Pipeline спроектирован так, что падение одного источника
 не валит весь прогон (остальные города/источники должны отработать). Поэтому «тихие» сбои
-авторизации (Timepad 403) сами по себе не доводят джобу до `failure()` — их ловит шаг 5
-через файл предупреждений. Полное падение джобы (упал импорт, недоступна БД) ловит шаг 6.
+авторизации (Timepad 403) сами по себе не доводят джобу до `failure()` — их ловит шаг 7
+через файл предупреждений. Полное падение джобы (упал импорт, недоступна БД) ловит шаг 8.
 
 **Секреты (Environment "Production"):**
 
@@ -1774,6 +1795,7 @@ City ID определяется один раз из `api.quizplease.ru/api/cit
 | `SUPABASE_URL` | URL проекта Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role ключ (запись в БД) |
 | `GEMINI_API_KEY` | Google Gemini API |
+| `GROQ_API_KEY` | Groq API — фолбэк-провайдер в дефолтной цепочке `LLM_FALLBACK_PROVIDERS=gemini,groq` |
 | `TWOGIS_API_KEY` | 2ГИС Catalog API |
 | `TIMEPAD_TOKEN` | Timepad API (Bearer-токен) для direct_api источников |
 | `VK_SERVICE_KEY` | Сервисный ключ VK mini-app для `vk-events`/`vk-posts` |
@@ -1803,6 +1825,23 @@ City ID определяется один раз из `api.quizplease.ru/api/cit
 **Секреты:** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TWOGIS_API_KEY` (опц. — если нет, сразу Playwright).
 
 **Защита manual-данных:** `db.upsert_venues` перед записью выбирает id с `source='manual'` и пропускает их — ручной ввод через Supabase Table Editor всегда выигрывает.
+
+---
+
+### `.github/workflows/backup_venues.yml` — еженедельный бекап venues в git
+
+Supabase free tier не делает бекапов, поэтому раз в неделю таблица `venues` выгружается в SQL и
+коммитится в репозиторий — восстановление возможно из истории git.
+
+**Триггеры:**
+- Cron: `0 4 * * 0` (воскресенье 04:00 UTC = 07:00 МСК, после ночного `parse.yml`)
+- `workflow_dispatch` — ручной запуск
+
+**Шаги:** `export-venues --output supabase/seeds/venues.sql` → если файл изменился, коммит
+`chore: venues backup snapshot` от имени `github-actions[bot]` и push в текущую ветку
+(джобе нужны права `permissions: contents: write`).
+
+**Секреты:** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
 ---
 
@@ -2452,6 +2491,7 @@ cp .env.example .env
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=...
 GEMINI_API_KEY=...
+GROQ_API_KEY=...             # фолбэк-провайдер: LLM_FALLBACK_PROVIDERS=gemini,groq по умолчанию
 TWOGIS_API_KEY=...
 TIMEPAD_TOKEN=...
 VK_SERVICE_KEY=...           # сервисный ключ VK mini-app (vk-events / vk-posts)
@@ -2518,6 +2558,7 @@ python -m parser.cli sync-venues --city all --force    # реальная пер
 | `export-venues [--city <c>] --output <path>` | Снимок таблицы `venues` в SQL-файл (бекап) | нет |
 | `refresh-venues --city <c\|all> [--source auto\|twogis\|playwright]` | Сбор заведений в таблицу `venues` из 2ГИС | да (`venues`) |
 | `sync-venues --city <c\|all> [--force]` | Пересборка `venues` из `events(always, twogis-*)`. Без `--force` — dry-run | да с `--force` (`venues`) |
+| `dedup-backfill --city <c> [--threshold] [--apply]` | Разбор накопленных fuzzy-дублей. Без `--apply` — только печать кластеров | да с `--apply` (`events`) |
 
 ### Миграции БД
 
@@ -2577,4 +2618,4 @@ npm run dev
 3. Если URL находятся — сухой прогон: `python -m parser.cli run --city perm --source my-source --dry-run`
 4. Боевой прогон: `python -m parser.cli run --city perm --source my-source`
 
-Для `direct_api`-источников (`twogis`/`timepad`/`kudago`) дискавери не нужен — задаётся `provider` (и для `twogis` ещё `api_query` + `event_type`), сразу `run --dry-run`.
+Для `direct_api`-источников (`twogis`/`timepad`/`kudago`/`quizplease`/`permm`/`permopera`) дискавери не нужен — задаётся `provider` (и для `twogis` ещё `api_query` + `event_type`; для `permm`/`permopera` — `event_type` + `venue_name`, опц. `address`), сразу `run --dry-run`.

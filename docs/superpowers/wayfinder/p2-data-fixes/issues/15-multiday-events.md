@@ -4,6 +4,7 @@ Type: grilling
 Скилл: superpowers:brainstorming — решение меняет модель данных
 Status: resolved
 Blocked by: —
+Код-тикет: `docs/superpowers/wayfinder/p8-parser-decisions-code/issues/04-multiday-events-code.md`
 
 ## Question
 

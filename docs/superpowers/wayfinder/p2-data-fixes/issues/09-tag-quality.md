@@ -4,6 +4,7 @@ Type: grilling
 Скилл: superpowers:brainstorming — затрагивает промпты, валидатор и слияние, требует перепарсинга
 Status: resolved
 Blocked by: 12 (resolved)
+Код-тикет: `docs/superpowers/wayfinder/p8-parser-decisions-code/issues/02-tag-quality-code.md`
 
 ## Question
 

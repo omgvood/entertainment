@@ -4,6 +4,7 @@ Type: grilling
 Скилл: superpowers:brainstorming — решение меняет схему БД и промпты парсера
 Status: resolved
 Blocked by: 01, 10
+Код-тикет: `docs/superpowers/wayfinder/p7-ui-ux-pass/issues/08-price-kind-code.md`
 
 ## Question
 

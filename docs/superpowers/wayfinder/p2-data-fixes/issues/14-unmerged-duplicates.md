@@ -5,6 +5,7 @@ Type: grilling
 Status: resolved
 Blocked by: —
 Волна: 4 (открыта 2026-09-22)
+Код-тикет: `docs/superpowers/wayfinder/p8-parser-decisions-code/issues/03-dedup-title-score-fix.md`
 
 ## Question
 
