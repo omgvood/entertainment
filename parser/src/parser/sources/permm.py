@@ -45,7 +45,8 @@ class PermMuseumClient:
         for group in (await self._fetch(_EVENTS_URL)).get("data") or []:
             for bucket in group.get("events") or []:
                 for raw in bucket if isinstance(bucket, list) else [bucket]:
-                    self._collect(raw, results, seen, event_type=event_type, venue_name=venue_name, address=address)
+                    self._collect(raw, results, seen, event_type=event_type, venue_name=venue_name, address=address,
+                                  from_events_feed=True)
 
         return results
 
@@ -94,7 +95,7 @@ def _resolve_image(media: Optional[str]) -> Optional[str]:
 
 
 def _map_item(
-    raw: dict, *, event_type: str, venue_name: str, address: str
+    raw: dict, *, event_type: str, venue_name: str, address: str, from_events_feed: bool = False
 ) -> Optional[ParsedEvent]:
     title = (raw.get("title_extended") or "").strip()
     starts_at = _parse_date(raw.get("starts_at"))
@@ -110,6 +111,11 @@ def _map_item(
     description = raw.get("sub_title_extended") or None
     if description:
         description = description[:500]
+
+    # Фид событий — смесь выставок, лекций, экскурсий: event_type из seeds (exhibition) верен
+    # только для «Выставка «…»», остальное — other.
+    if from_events_feed and not title.startswith("Выставка"):
+        event_type = "other"
 
     return ParsedEvent(
         title=title[:300],

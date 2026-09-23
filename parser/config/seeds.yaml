@@ -272,7 +272,7 @@ cities:
       - name: permopera
         extraction_mode: direct_api
         provider: permopera
-        event_type: concert
+        event_type: theater         # фолбэк: карточка без известной метки «Тип события»
         venue_name: "Пермский театр оперы и балета им. П. И. Чайковского"
         address: "Пермь, ул. Петропавловская, 25а"
         priority: 55

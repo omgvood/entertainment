@@ -36,6 +36,15 @@ _HEADERS = {
     "Accept-Language": "ru-RU,ru;q=0.9",
 }
 
+# Метка «Тип события» из карточки → EventType. Нет метки / незнакомая → event_type из seeds.
+_LABEL_TYPES = {
+    "Опера": "theater",
+    "Балет": "theater",
+    "Концерт": "concert",
+    "Экскурсия": "trip",
+    "Другие события": "other",
+}
+
 
 class PermOperaClient:
     def __init__(self, client: httpx.AsyncClient) -> None:
@@ -91,6 +100,7 @@ def parse_cards(
       article[data-element="event-card"]      — карточка спектакля
       link[data-element="event-date"] content — ISO дата-время "YYYY-MM-DDTHH:MM:SS"
       a[href*="/playbills/playbill/"]          — ссылка на спектакль + его название
+      h3[data-element="event-name"] + div p   — авторы / метка «Тип события» / возраст
     """
     out: list[tuple[ParsedEvent, str]] = []
     for card in HTMLParser(html).css('article[data-element="event-card"]'):
@@ -113,7 +123,7 @@ def parse_cards(
             (
                 ParsedEvent(
                     title=title[:300],
-                    type=event_type,  # type: ignore[arg-type]
+                    type=_card_type(card, event_type),  # type: ignore[arg-type]
                     date=date_str,
                     time_start=time_str,
                     venue_name=venue_name,
@@ -128,6 +138,16 @@ def parse_cards(
             )
         )
     return out
+
+
+def _card_type(card, fallback: str) -> str:
+    """Тип по метке из блока под названием; метки нет или она незнакома → fallback."""
+    block = card.css_first('h3[data-element="event-name"] + div')
+    for p in block.css("p") if block else []:
+        label = " ".join(p.text().split())
+        if label in _LABEL_TYPES:
+            return _LABEL_TYPES[label]
+    return fallback
 
 
 def _card_datetime(card) -> tuple[Optional[str], Optional[str]]:

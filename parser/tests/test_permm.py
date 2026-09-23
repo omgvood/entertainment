@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from parser.sources.permm import _map_item, _parse_date, _resolve_image
 
 
@@ -48,6 +50,21 @@ def test_exhibition_range_uses_ends_at():
     assert ev.type == "exhibition"
     assert ev.price_text == "по билетам"
     assert ev.image_url and ev.image_url.startswith("https://")
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        # Заголовки из фида /json/events/sub/home (БД, 2026-09-23).
+        ("Выставка «Стечение обстоятельств»", "exhibition"),
+        ("Проект «ПЕРММ: дискурс». Лекция Сергея Полищука «Облака земные и космические»", "other"),
+        ("Арт-медиация в рамках выставки «Стечение обстоятельств»", "other"),
+    ],
+)
+def test_events_feed_type_by_title(title, expected):
+    raw = {"title_extended": title, "starts_at": "24.09.2026", "ends_at": None}
+    ev = _map_item(raw, from_events_feed=True, **_DEFAULTS)
+    assert ev is not None and ev.type == expected
 
 
 def test_single_day_uses_starts_at():
