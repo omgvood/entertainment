@@ -114,7 +114,7 @@ def _map_item(
 
     # Фид событий — смесь выставок, лекций, экскурсий: event_type из seeds (exhibition) верен
     # только для «Выставка «…»», остальное — other.
-    if from_events_feed and not title.startswith("Выставка"):
+    if from_events_feed and not title.lower().startswith("выставка"):
         event_type = "other"
 
     return ParsedEvent(
