@@ -3,7 +3,10 @@
 import json
 from pathlib import Path
 
-from parser.sources.permm import _map_item, _parse_date, _resolve_image
+import httpx
+import pytest
+
+from parser.sources.permm import PermMuseumClient, _map_item, _parse_date, _resolve_image
 
 
 _FX = Path(__file__).resolve().parent / "fixtures"
@@ -48,6 +51,38 @@ def test_exhibition_range_uses_ends_at():
     assert ev.type == "exhibition"
     assert ev.price_text == "по билетам"
     assert ev.image_url and ev.image_url.startswith("https://")
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        # Заголовки из фида /json/events/sub/home (БД, 2026-09-23).
+        ("Выставка «Стечение обстоятельств»", "exhibition"),
+        ("ВЫСТАВКА «СТЕЧЕНИЕ ОБСТОЯТЕЛЬСТВ»", "exhibition"),  # permm пишет часть заголовков капсом
+        ("Проект «ПЕРММ: дискурс». Лекция Сергея Полищука «Облака земные и космические»", "other"),
+        ("Арт-медиация в рамках выставки «Стечение обстоятельств»", "other"),
+    ],
+)
+def test_events_feed_type_by_title(title, expected):
+    raw = {"title_extended": title, "starts_at": "24.09.2026", "ends_at": None}
+    ev = _map_item(raw, from_events_feed=True, **_DEFAULTS)
+    assert ev is not None and ev.type == expected
+
+
+@pytest.mark.asyncio
+async def test_search_types_by_feed():
+    # Фид выставок → тип из seeds; фид событий → правило «Выставка…» / other.
+    feeds = {
+        "/json/exhibitions/active": (_FX / "permm_exhibitions.json").read_text(encoding="utf-8"),
+        "/json/events/sub/home": (_FX / "permm_events.json").read_text(encoding="utf-8"),
+    }
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text=feeds[req.url.path]))
+    async with httpx.AsyncClient(transport=transport) as client:
+        results = await PermMuseumClient(client).search(**_DEFAULTS)
+    types = {url: ev.type for ev, url in results}
+    assert types["https://permm.ru/exhibition/zvuchit-uvertura-2026"] == "exhibition"
+    assert types["https://permm.ru/events/vystavka-zvucit-uvertyura-1"] == "exhibition"
+    assert types["https://permm.ru/events/kulturnaya-sreda"] == "other"
 
 
 def test_single_day_uses_starts_at():
