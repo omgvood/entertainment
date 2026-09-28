@@ -31,7 +31,7 @@ function schemaType(type: string): string {
 
 /** Абсолютный URL страницы площадки. */
 export function venueUrl(venue: VenueItem): string {
-  return `${SITE_URL}/${venue.city}/venues/${venue.slug}/`;
+  return `${SITE_URL}/${venue.city}/venues/${venue.slug}`;
 }
 
 export function buildVenueMetadata(venue: VenueItem, city: City): Metadata {
@@ -81,13 +81,13 @@ export function venueJsonLd(venue: VenueItem, city: City): object[] {
         "@type": "ListItem",
         position: 1,
         name: `Афиша ${cityGenitive(city)}`,
-        item: `${SITE_URL}/${city}/`,
+        item: `${SITE_URL}/${city}`,
       },
       {
         "@type": "ListItem",
         position: 2,
         name: "Площадки",
-        item: `${SITE_URL}/${city}/venues/`,
+        item: `${SITE_URL}/${city}/venues`,
       },
       {
         "@type": "ListItem",

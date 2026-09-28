@@ -46,7 +46,7 @@ export function EventCard({ event, moreDates, today, nowMinutes }: EventCardProp
 
   return (
     <Link
-      href={`/${event.city}/events/${event.slug}/`}
+      href={`/${event.city}/events/${event.slug}`}
       className="group bg-surface border border-border rounded-2xl overflow-hidden hover:border-[color:var(--color-border-hi,#4a3d6b)] hover:shadow-[0_22px_44px_-22px_rgba(255,61,127,0.35)] hover:-translate-y-0.5 transition-all duration-150 flex flex-col"
     >
       <div className="relative aspect-video bg-bg">

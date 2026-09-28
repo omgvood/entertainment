@@ -25,7 +25,7 @@ export function OtherDates({ current, siblings }: { current: EventItem; siblings
               ) : (
                 <Link
                   key={e.id}
-                  href={`/${e.city}/events/${e.slug}/`}
+                  href={`/${e.city}/events/${e.slug}`}
                   className="text-muted hover:text-accent hover:underline underline-offset-2"
                 >
                   {e.timeStart ?? "время не указано"}

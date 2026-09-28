@@ -18,7 +18,7 @@ export function VenuesSection({ venues, city, totalCount }: VenuesSectionProps) 
         </h2>
         {totalCount > venues.length && (
           <Link
-            href={`/${city}/venues/`}
+            href={`/${city}/venues`}
             className="text-sm font-medium text-accent hover:text-accent-hover"
           >
             Все площадки →
