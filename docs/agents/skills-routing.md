@@ -7,7 +7,7 @@
 | Тип задачи | Скилл | Куда сохраняется |
 |---|---|---|
 | Известный баг, «чтобы работало» | `systematic-debugging` → `test-driven-development` → фикс → `verification-before-completion` | код + тест, без отдельного файла |
-| Самопроизвольно найденный баг (UI, данные, архитектура) | локализация + исследование → handoff → откатить → завести тикет → Сценарий 1 | `HANDOFF_<название>.md` (temp) + тикет в wayfinder |
+| Самопроизвольно найденный баг (UI, данные, архитектура) | внеплановая ветка `session-protocol.md` §«Вход в сессию»: локализация по R-02 без правок кода → тикет `Status: backlog` → решение пользователя, брать ли сейчас | тикет в `docs/superpowers/wayfinder/<эффорт>/issues/` |
 | Полировка / рефакторинг без смены поведения | есть развилка → `brainstorming` (bounded); дальше `simplify` | код |
 | Фича, границы ясны, одна сессия | `brainstorming` bounded (дизайн в чате) → реализация с TDD | код |
 | Фича, нужен спек и план, несколько сессий | `brainstorming` architectural → `writing-plans` → `subagent-driven-development`/`executing-plans` | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
