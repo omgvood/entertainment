@@ -9,7 +9,7 @@ export function VenueCard({ venue }: { venue: VenueItem }) {
 
   return (
     <Link
-      href={`/${venue.city}/venues/${venue.slug}/`}
+      href={`/${venue.city}/venues/${venue.slug}`}
       className="group bg-surface border border-border rounded-2xl overflow-hidden hover:shadow-[0_22px_44px_-22px_rgba(255,61,127,0.35)] hover:-translate-y-0.5 transition-all duration-150 flex flex-col"
     >
       <div className="relative aspect-[4/3] bg-[#ddd]">

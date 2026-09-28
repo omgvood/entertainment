@@ -9,7 +9,7 @@ export function VenuesCatalog({ venues, city }: { venues: VenueItem[]; city: Cit
   return (
     <main className="mx-auto max-w-[1440px] px-4 pt-6 pb-12 flex-1 w-full">
       <Link
-        href={`/${city}/`}
+        href={`/${city}`}
         className="inline-flex items-center gap-1 text-sm text-muted hover:text-accent mb-4"
       >
         ← Афиша {cityGenitive(city)}

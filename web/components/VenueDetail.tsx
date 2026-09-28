@@ -33,11 +33,11 @@ export function VenueDetail({ venue, city }: { venue: VenueItem; city: City }) {
 
       <article className="mx-auto max-w-3xl px-4 pt-6 pb-12 flex-1 w-full">
         <nav className="text-[13px] text-muted mb-4 flex flex-wrap items-center gap-1" aria-label="Хлебные крошки">
-          <Link href={`/${city}/`} className="hover:text-accent">
+          <Link href={`/${city}`} className="hover:text-accent">
             Афиша {cityGenitive(city)}
           </Link>
           <span aria-hidden>›</span>
-          <Link href={`/${city}/venues/`} className="hover:text-accent">
+          <Link href={`/${city}/venues`} className="hover:text-accent">
             Площадки
           </Link>
           <span aria-hidden>›</span>
