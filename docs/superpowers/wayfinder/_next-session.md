@@ -5,7 +5,7 @@
 
 ## Базовая линия
 
-- `master` = `f40127c` + docs-коммит сведения 2026-09-29 (единственный допустимый коммит сверху, кроме docs-коммитов в `docs/superpowers/wayfinder/`).
+- `master` = `33fda5e` (docs-коммит сведения 2026-09-29). Сверху допустимы только docs-коммиты в `docs/superpowers/wayfinder/` и мердж PR #37 (`docs/site-audit`, добавляет только `docs/research/2026-09-24-site-audit.md`). Если #37 ещё открыт — не стоп, спросить про мердж; после мерджа — уборка R-04 ветки `docs/site-audit`.
 - `cd parser && python -m pytest -q` → 298 passed.
 - `cd web && npx vitest run` → 115 passed (8 файлов).
 - Открыто ровно три тикета (R-05): p9/01, p9/02, p8/03. Остальные open-тикеты p4–p8 возвращены в `backlog`.
