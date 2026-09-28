@@ -5,6 +5,7 @@ Type: task
 Status: open
 Blocked by: —
 Ветка: `fix/site-url-and-trailing-slash`
+Шаги пользователя: ждут
 
 ## Question
 
@@ -23,7 +24,14 @@ Blocked by: —
 - Слэш на конце (греп 2026-09-29): `web/lib/types.ts:38,46` (`CITY_CONFIG.path`), `web/app/sitemap.ts:17-68`, `web/lib/venue-meta.ts:34,84,90`, `web/components/EventCard.tsx:49`, `OtherDates.tsx:28`, `VenueCard.tsx:12`, `VenueDetail.tsx:36,40`, `VenuesCatalog.tsx:12`, `VenuesSection.tsx:21`. `trailingSlash` в `web/next.config.ts` не задан.
 - `NEXT_PUBLIC_*` подставляется при сборке: после смены переменной нужна пересборка.
 - Смежное: p7/06 (JSON-LD на страницах событий) берёт тот же `SITE_URL` — после этого тикета получает рабочий домен.
-- Шаги пользователя (агент не меняет настройки аккаунтов): исправить `NEXT_PUBLIC_SITE_URL` в Vercel (Production и Preview) на `https://entertainment-eta.vercel.app`; завести счётчик Метрики; подтвердить сайт в Вебмастере и Search Console и задать три переменные.
+
+## Шаги пользователя
+
+| Шаг | Где | Статус |
+|---|---|---|
+| `NEXT_PUBLIC_SITE_URL` = `https://entertainment-eta.vercel.app` (Production и Preview), затем пересборка | Vercel → Project → Settings → Environment Variables | сделан 2026-09-29 — старая запись была типа Secret, а `NEXT_PUBLIC_*` Vercel разрешает только как Config: удалена и заведена заново (Config, Production + Preview), пересборка Production. Проверено: в `sitemap.xml` 688 ссылок на `entertainment-eta.vercel.app`, 0 на `entertaiments`; `robots.txt` исправлен. Запись Development не трогалась |
+| Завести счётчик Метрики, задать `NEXT_PUBLIC_YM_ID` | metrika.yandex.ru → Vercel | ждёт |
+| Подтвердить сайт, задать `YANDEX_VERIFICATION` и `GOOGLE_SITE_VERIFICATION` | Яндекс Вебмастер, Google Search Console → Vercel | ждёт |
 
 ## Цифры
 

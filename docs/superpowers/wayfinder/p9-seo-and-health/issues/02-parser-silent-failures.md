@@ -5,6 +5,7 @@ Type: task
 Status: open
 Blocked by: —
 Ветка: `fix/parser-silent-failures`
+Шаги пользователя: ждут
 
 ## Question
 
@@ -20,8 +21,14 @@ Blocked by: —
 - `last_error` берётся из `sub.warnings[0]`: `pipeline.py:299-311` → `db.py:340-352` (`record_source_health`).
 - Отправка в Telegram: `.github/workflows/parse.yml:66-83` → `scripts/notify_warnings.py`.
 - `twogis-*` в событийном пайплайне: `parser/config/seeds.yaml:35-49` (Сочи, 3 источника), `:129-167` (Пермь, 6 источников).
-- Timepad 403 — протухший токен в GitHub Secrets, не IP-блок: диагностика в памяти проекта `timepad-source` (вне git, `~/.claude/projects/.../memory/`). Токен продлевает пользователь.
+- Timepad 403 — протухший токен в GitHub Secrets, не IP-блок: диагностика в памяти проекта `timepad-source` (вне git, `~/.claude/projects/.../memory/`).
 - Смежное: p6/01 (частота фолбэка Groq) упрётся в тот же пробел — причины LLM-сбоев в `source_health` нет.
+
+## Шаги пользователя
+
+| Шаг | Где | Статус |
+|---|---|---|
+| Продлить токен Timepad и обновить секрет (не горит, решение 2026-09-29) | timepad.ru → кабинет организатора → API; GitHub → Settings → Secrets and variables → Actions | ждёт |
 
 ## Цифры
 
@@ -57,7 +64,7 @@ group by 1,2 order by 1 desc,2;
 
 - После ближайшего прогона в `source_health` у каждой строки с `errors > 0` непустой `last_error`.
 - `twogis-*` отсутствуют в `source_health` событийного прогона; `refresh_venues.yml` не тронут.
-- Timepad: `events_found > 0` хотя бы в Перми в прогоне после продления токена.
+- Timepad: `events_found > 0` хотя бы в Перми в прогоне после продления токена (шаг пользователя; пока он `ждёт`, критерий не блокирует закрытие остальных пунктов — переносится строкой в «Отложено» `_next-session.md`).
 - Telegram получает одно сообщение на прогон вместо отдельных.
 - `cd parser && python -m pytest -q` зелёный.
 - Выполнено обновление файла map.md
