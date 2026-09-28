@@ -2,7 +2,7 @@
 
 Type: research
 Скилл: `mattpocock-skills:research` — нужны факты из БД и с сайтов-источников, а не догадки по одной карточке
-Status: open
+Status: backlog (сведение 2026-09-29, R-05)
 Blocked by: —
 Ветка: `research/card-data-quality`
 

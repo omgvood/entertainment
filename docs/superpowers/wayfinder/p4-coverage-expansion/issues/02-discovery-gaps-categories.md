@@ -2,7 +2,7 @@
 
 Type: research
 Скилл: `mattpocock-skills:research` — нужны факты о том, какие Telegram-каналы/VK-сообщества закрывают пробел по каждой категории, прежде чем заводить задачу на подключение
-Status: open
+Status: backlog (сведение 2026-09-29, R-05)
 Blocked by: —
 Ветка: `research/discovery-coverage-gaps`
 

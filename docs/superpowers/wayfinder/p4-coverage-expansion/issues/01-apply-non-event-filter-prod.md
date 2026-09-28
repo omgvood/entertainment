@@ -2,7 +2,7 @@
 
 Type: task
 Скилл: не нужен — план уже написан (`docs/superpowers/plans/2026-09-18-non-event-filter.md`), реализация идёт по нему
-Status: open
+Status: resolved
 Blocked by: —
 Ветка: `fix/apply-non-event-filter-prod`
 
@@ -50,7 +50,23 @@ where city = 'perm'
 
 ## Answer
 
-<Заполняется в конце сессии.>
+Закрыт на сведении 2026-09-29 сверкой в БД, код не правился.
 
-Локализация: `<команда>`, найдено N мест
-Расхождения цифр: <или «нет»>
+- Миграция `remove_non_events_social` применена в боевой БД (версия `20260920080734`, `list_migrations`). Выборка из удалённых id возвращает 0 строк.
+- Первый прогон крона после мерджа — 2026-09-18 23:08 UTC (минимальный `source_health.run_at` после 18.09).
+- Доля `other` среди будущих событий Перми упала с ~27% до 5% (на 2026-09-29: 14 из 273, из них 12 из vk/telegram).
+- **Остаток, решено не удалять в этой сессии.** Дельта от старого кода — 1 строка: «Новая школа в Дзержинском районе Перми» (`vk-posts`, `education`, `date = 2028-01-01`, `parsed_at` 2026-07-22). Прошли все три слоя нового кода — 2 строки: «Дежурство поисково-спасательного самолёта Ан-26» (`parsed_at` 2026-09-18 23:09) и «Силиконовый ершик для посуды» (2026-09-27). Удаление и разбор, какой слой должен был поймать, — одной строкой в тумане карты p8 (находка G аудита 2026-09-24), по решению пользователя.
+
+SQL: прогнан 2026-09-29.
+
+```sql
+select count(*) from events where id in (<5 id из миграции>);  -- 0
+select date, source, title, parsed_at from events
+where city='perm' and type='other' and date<>'always'
+  and date >= to_char(now() at time zone 'Asia/Yekaterinburg','YYYY-MM-DD')
+  and (source like 'vk-%' or source like 'telegram-%') order by parsed_at;
+select city, source, type, date, title, parsed_at from events where date >= '2027-01-01' and date <> 'always';
+```
+
+Локализация: не применимо — код не менялся, только чтение БД
+Расхождения цифр: запрос в «Цифрах» тикета без скобок вокруг `or` — не прогонялся, заменён запросами выше

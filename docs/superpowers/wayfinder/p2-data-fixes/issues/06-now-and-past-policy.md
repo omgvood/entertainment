@@ -2,7 +2,7 @@
 
 Type: grilling
 Скилл: superpowers:brainstorming — политика влияет и на карточку, и на счётчики ленты
-Status: open
+Status: resolved
 Blocked by: 11
 Волна: 4 (открыта 2026-09-22)
 

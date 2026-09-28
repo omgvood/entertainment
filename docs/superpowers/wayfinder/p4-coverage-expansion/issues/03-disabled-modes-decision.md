@@ -2,7 +2,7 @@
 
 Type: grilling
 Скилл: `grilling` + `domain-modeling` — решение продукта (держать/включать/сносить), не факт и не код
-Status: open
+Status: backlog (сведение 2026-09-29, R-05)
 Blocked by: —
 Ветка: —
 

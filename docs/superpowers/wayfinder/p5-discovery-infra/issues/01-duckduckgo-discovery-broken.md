@@ -2,7 +2,7 @@
 
 Type: task
 Скилл: `systematic-debugging` → `test-driven-development` → фикс → `verification-before-completion` — причина уже известна (202-ответы вместо результатов поиска), это доводка, а не разведка
-Status: open
+Status: backlog (сведение 2026-09-29, R-05)
 Blocked by: —
 Ветка: `fix/duckduckgo-discovery-202`
 

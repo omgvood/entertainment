@@ -13,7 +13,7 @@ DuckDuckGo как поисковый провайдер Discovery либо сн�
 
 | Тикет | Тип | Статус |
 |---|---|---|
-| [DuckDuckGo Discovery сломан (202-ответы)](issues/01-duckduckgo-discovery-broken.md) | task | open |
+| [DuckDuckGo Discovery сломан (202-ответы)](issues/01-duckduckgo-discovery-broken.md) | task | backlog (сведение 2026-09-29, R-05) |
 
 Один тикет — сразу вся волна: причина уже известна (202-ответы), это доводка через `systematic-debugging`, а не многошаговая разведка, поэтому карта минимальна.
 

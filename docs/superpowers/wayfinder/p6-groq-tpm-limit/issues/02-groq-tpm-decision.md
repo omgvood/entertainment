@@ -2,7 +2,7 @@
 
 Type: grilling
 Скилл: `grilling` + `domain-modeling` — решение продукта на основе цифр из тикета 01, не факт и не код
-Status: open
+Status: backlog (сведение 2026-09-29, R-05)
 Blocked by: [Groq TPM-лимит: как часто и насколько дорого фолбэк на Gemini](01-groq-fallback-frequency.md)
 Ветка: —
 

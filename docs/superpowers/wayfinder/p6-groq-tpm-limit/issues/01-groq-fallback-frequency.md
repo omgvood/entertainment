@@ -2,7 +2,7 @@
 
 Type: research
 Скилл: `mattpocock-skills:research` — нужны цифры из логов/`source_health`, прежде чем решать, стоит ли что-то менять
-Status: open
+Status: backlog (сведение 2026-09-29, R-05)
 Blocked by: —
 Ветка: `research/groq-tpm-fallback-frequency`
 

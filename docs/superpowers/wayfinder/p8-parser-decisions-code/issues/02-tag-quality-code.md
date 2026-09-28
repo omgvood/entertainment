@@ -2,7 +2,7 @@
 
 Type: task
 Скилл: `mattpocock-skills:tdd` — поведение тегов (промпт, `validator.py`, `merge.py`) держат тесты парсера, новое условие/правило фиксируется тестом первым; `TAGS_VERSION` требует перепарсинга — согласовать с пользователем перед прогоном
-Status: open
+Status: backlog (сведение 2026-09-29, R-05)
 Blocked by: —
 Ветка: `fix/tag-quality`
 

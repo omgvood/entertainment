@@ -13,8 +13,8 @@ Status: активен
 
 | Тикет | Тип | Статус |
 |---|---|---|
-| [Groq TPM-лимит: как часто и насколько дорого фолбэк на Gemini](issues/01-groq-fallback-frequency.md) | research | open |
-| [Groq TPM-лимит: стоит ли что-то менять](issues/02-groq-tpm-decision.md) | grilling | open, blocked by тикет 01 |
+| [Groq TPM-лимит: как часто и насколько дорого фолбэк на Gemini](issues/01-groq-fallback-frequency.md) | research | backlog (сведение 2026-09-29, R-05) |
+| [Groq TPM-лимит: стоит ли что-то менять](issues/02-groq-tpm-decision.md) | grilling | backlog (сведение 2026-09-29), blocked by тикет 01 |
 
 Два тикета сразу, но второй заблокирован первым — фактическая работа идёт по одному: сначала цифры, потом решение.
 
