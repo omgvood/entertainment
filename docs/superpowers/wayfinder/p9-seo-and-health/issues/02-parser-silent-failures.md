@@ -80,7 +80,7 @@ group by 1,2 order by 1 desc,2;
 - `last_error = "Отброшено spurious 'always'"` при `errors > 0` (vk-posts 26.09) — пропуск маскировал сбой;
 - путь `scripts/notify_warnings.py` не существует, файл — `parser/scripts/notify_warnings.py`;
 - **2ГИС** падает не «без причины»: лог GHA 27.09 — `meta.code=403 Authorization error, incorrect key` при HTTP 200, `TWOGIS_API_KEY` невалиден. Значит, и API-ветка `refresh-venues` не работает (предположение: спасает фолбэк Playwright при `source=auto`, не проверялось);
-- **Timepad**: тело 403 в CI — HTML-челлендж Cloudflare («Just a moment...»), а не JSON-ответ API. Гипотеза: блок по IP раннера, новый токен может не помочь — противоречит памяти `timepad-source`. Проверка `curl` без токена заблокирована харнессом, не выполнена.
+- **Timepad**: тело 403 в CI — HTML-челлендж Cloudflare («Just a moment...»), а не JSON-ответ API. Гипотеза: блок по IP раннера, новый токен может не помочь — противоречит памяти `timepad-source`. Проверка пользователем 2026-09-29 (`curl` без токена с домашнего IP): `403 application/json`, `"Запрос требует указание токена"` — API отвечает JSON, челленджа нет. Челлендж только у раннера GitHub → блок по IP вероятнее протухшего токена; окончательно проверит прогон с новым токеном.
 
 Что сделано:
 - `pipeline._record_failure(sub, source, reason, exc)` — единая точка сбоя: `failed += 1` + причина `"<источник>: <что>: <тип>: <текст>"[:200]`; заменены все 20 веток. Текст для HTTP 400/401/403 прежний.
