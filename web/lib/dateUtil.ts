@@ -51,6 +51,19 @@ export function getCityToday(city: City): string {
   }).format(new Date());
 }
 
+/** Сдвиг города от UTC в виде «+05:00» — для дат с часовым поясом (JSON-LD). */
+export function cityUtcOffset(city: City): string {
+  const timezone = CITY_TIMEZONES[city] ?? "Europe/Moscow";
+  // longOffset даёт "GMT+05:00" — отрезаем "GMT".
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")!
+    .value.slice(3);
+}
+
 /** «Сейчас» в таймзоне города — минуты от местной полуночи, чтобы «через 2 ч» считалось по часам города, а не зрителя. */
 export function getCityNowMinutes(city: City): number {
   const timezone = CITY_TIMEZONES[city] ?? "Europe/Moscow";

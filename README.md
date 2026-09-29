@@ -261,9 +261,10 @@ entertainment/
 │   │   ├── events.ts               — запросы к Supabase (getEventsByCity, getEventBySlug); ре-экспортирует getCityToday из dateUtil.ts
 │   │   ├── venues.ts               — запросы к Supabase (getVenuesByCity, getVenueBySlug)
 │   │   ├── venue-meta.ts           — SEO-хелперы площадок (metadata, JSON-LD, род. падеж города)
+│   │   ├── event-meta.ts           — SEO-хелперы событий (canonical, JSON-LD Event)
 │   │   ├── venue-styles.ts         — стили карточек/бейджей по типу площадки
 │   │   ├── event-styles.ts         — неоновые бейджи и градиенты-плейсхолдеры по EventType
-│   │   ├── dateUtil.ts             — арифметика календарных дат в UTC (addDaysUTC, formatDayMonth), форматтеры дня недели (formatStripDay, formatWeekdayDayMonth), getCityToday, getCityNowMinutes
+│   │   ├── dateUtil.ts             — арифметика календарных дат в UTC (addDaysUTC, formatDayMonth), форматтеры дня недели (formatStripDay, formatWeekdayDayMonth), getCityToday, getCityNowMinutes, cityUtcOffset
 │   │   ├── eventTiming.ts          — статус времени события сегодня (live/upcoming/started), eventTimeStatus, isAvailable
 │   │   ├── series.ts               — группировка повторов события в серии (seriesKey, groupSeries, otherDates, groupByDate)
 │   │   ├── dateStrip.ts            — пункты ленты дат и выбор ближайшего непустого дня
@@ -2416,11 +2417,10 @@ guard по кластерам сходства названий, порог 0.95
 и «неизвестно», ограничение «до N рублей» либо не отсекает ничего, либо теряет четверть афиши.
 Разблокируется пунктом 18 в разделе «Данные / схема».
 
-**13. Schema.org `Event` на страницах событий** 📋  
-Площадки размечены (`SportsActivityLocation` + `BreadcrumbList` в `lib/venue-meta.ts`), а страницы
-событий — нет: ни JSON-LD `Event`, ни canonical. Для афиши это основная разметка (сниппеты с датой
-и ценой в выдаче). Делается по образцу `venue-meta.ts` — хелпер `event-meta.ts` + вставка в обе
-`events/[slug]/page.tsx`.
+**13. Schema.org `Event` на страницах событий** ✅  
+Страницы событий получают JSON-LD `Event` и canonical (`lib/event-meta.ts`, по образцу `venue-meta.ts`):
+`startDate` в часовом поясе города, `location` с адресом, `image` только годная, `offers` только при
+известной цене или «бесплатно». События без даты («always») разметки `Event` не получают.
 
 **14. Фильтр по району** 📋  
 Блок «Район» в поповере фильтров уже удалён P1 (задизейбленные чекбоксы с жёстко зашитыми

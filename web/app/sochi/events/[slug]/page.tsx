@@ -9,6 +9,7 @@ import { eventBadgeStyle, eventPlaceholder } from "@/lib/event-styles";
 import { BackLink } from "@/components/BackLink";
 import { OtherDates } from "@/components/OtherDates";
 import { isPastEvent } from "@/lib/eventTiming";
+import { eventJsonLd, eventUrl, jsonLdScript } from "@/lib/event-meta";
 
 function isUsableImage(url?: string): boolean {
   if (!url) return false;
@@ -54,6 +55,7 @@ export async function generateMetadata(
   return {
     title,
     description,
+    alternates: { canonical: eventUrl(event) },
     openGraph: {
       title,
       description,
@@ -73,9 +75,16 @@ export default async function EventPage(
   const siblings = await getSeriesSiblings("sochi", event, today);
 
   const placeholder = eventPlaceholder(event.type);
+  const jsonLd = eventJsonLd(event);
 
   return (
     <>
+      {jsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLdScript(jsonLd) }}
+        />
+      )}
       <Header city="sochi" />
       <article className="mx-auto max-w-2xl px-4 pt-6 pb-12 flex-1 w-full">
         <BackLink city="sochi" />
