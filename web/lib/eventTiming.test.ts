@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { eventTimeStatus, isAvailable } from "./eventTiming";
+import { eventTimeStatus, isAvailable, isPastEvent } from "./eventTiming";
 
 const TODAY = "2026-09-22";
 
@@ -97,5 +97,23 @@ describe("isAvailable", () => {
     expect(
       isAvailable(ev({ date: "2026-09-20", timeStart: "10:00" }), TODAY, 19 * 60),
     ).toBe(true);
+  });
+});
+
+describe("isPastEvent", () => {
+  it("событие раньше сегодняшнего дня города — прошло", () => {
+    expect(isPastEvent({ date: "2026-09-21" }, TODAY)).toBe(true);
+  });
+
+  it("сегодняшнее событие не прошло, даже если уже началось", () => {
+    expect(isPastEvent({ date: TODAY }, TODAY)).toBe(false);
+  });
+
+  it("будущее событие не прошло", () => {
+    expect(isPastEvent({ date: "2026-09-23" }, TODAY)).toBe(false);
+  });
+
+  it("постоянная площадка (date='always') не проходит", () => {
+    expect(isPastEvent({ date: "always" }, TODAY)).toBe(false);
   });
 });

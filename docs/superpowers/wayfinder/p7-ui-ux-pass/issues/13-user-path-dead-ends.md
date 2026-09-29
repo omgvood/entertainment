@@ -2,7 +2,7 @@
 
 Type: task
 Скилл: `superpowers:test-driven-development` — признак «событие прошло» считается функцией в `web/lib/`, её поведение фиксируется тестом первым; 404, шапка и отсутствие #418 проверяются в браузере (preview)
-Status: open
+Status: resolved
 Blocked by: —
 Ветка: `fix/user-path-dead-ends`
 Шаги пользователя: —
@@ -70,7 +70,14 @@ Blocked by: —
 
 ## Answer
 
-<Заполняется в конце сессии.>
+2026-09-29, ветка `fix/user-path-dead-ends`.
 
-Локализация: `<команда>`, найдено N мест
-Расхождения цифр: <или «нет»>
+- **404:** корневой `app/not-found.tsx` («Страница не найдена», шапка без города, кнопки «Афиша Перми» / «Афиша Сочи», свой `<title>`) и `app/{perm,sochi}/events/[slug]/not-found.tsx` («Событие не найдено», шапка города, ссылка «Что идёт в …»). `notFound()` страниц площадок (`app/{perm,sochi}/venues/[slug]/page.tsx:30`, в тикете не названы) попадает в корневую 404 — отдельной не делали.
+- **Прошедшее событие:** `isPastEvent(event, today)` в `web/lib/eventTiming.ts` (`date !== "always" && date < today`), 4 теста в `eventTiming.test.ts` написаны первыми (красные → зелёные). Плашка «Событие прошло» + ссылка на афишу города на обеих `[slug]/page.tsx`.
+- **Гидрация:** `nowMinutes` считается на `app/{perm,sochi}/page.tsx` при сборке и приходит в `CityView` пропом; эффект после монтирования пересчитывает, как раньше. Комментарий `lib/filters.ts:1-5` переписан.
+- **Шапка:** логотип → `CITY_CONFIG[city].path`, без города → `/`; надпись «Афиша» без `.PRM` (градиентный `span` удалён); `<Header city="perm" />` на событиях Перми. Спек палитры `2026-09-22-light-palette-design.md` (строки про логотип и `Header.tsx`) поправлен тем же PR — иначе p7/07 реализовывал бы несуществующий `.PRM` (согласовано с пользователем).
+- **Проверка:** `npx vitest run` — 123 passed (было 119, +4); `npx next build` проходит; eslint — одно старое предупреждение в `layout.tsx`. Preview на production-сборке (`next start`, конфиг `web-prod` добавлялся в `.claude/launch.json` временно и откачен): `/perm`, `/sochi` — консоль без ошибок; `/perm/events/alisa-v-strane-chudes-2026-09-28` — плашка есть, шапка подсвечивает Пермь, логотип → `/perm`; `/perm/events/moyo-2026-09-29` — плашки нет; `/chto-ugodno`, `/perm/events/net-takogo`, `/perm/venues/net-takogo` — статус 404, русский текст; `/sochi` и `/sochi/events/net-takogo` — логотип → `/sochi`. Прошедших событий Сочи в БД не было — плашка Сочи проверена только сборкой (код тот же).
+- **Ограничение проверки #418:** сборка свежая, часы сборки и браузера почти совпадали — пустая консоль слабое доказательство. Основание — по построению: первый клиентский рендер берёт `nowMinutes` из того же значения, что серверный HTML. Окончательно — консоль прода через несколько часов после ночной сборки.
+
+Локализация: `grep -rn -E "getCityNowMinutes|nowMinutes|<Header|notFound\(|getCityToday|isPast|eventTiming" app components lib` + по значению `grep -rn -E "\.PRM|href=\"/\"|not-found|прошло|mismatch" app components lib ../docs/superpowers/specs`, найдено 12 мест (сверх тикета: `venues/[slug]/page.tsx` ×2, спек палитры `:73`, `:138`)
+Расхождения цифр: нет

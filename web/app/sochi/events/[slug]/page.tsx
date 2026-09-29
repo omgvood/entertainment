@@ -3,11 +3,12 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Header } from "@/components/Header";
 import { getEventBySlug, getEventsByCity, getCityToday, getSeriesSiblings } from "@/lib/events";
-import { EVENT_TYPE_LABELS } from "@/lib/types";
+import { CITY_CONFIG, EVENT_TYPE_LABELS } from "@/lib/types";
 import type { EventItem } from "@/lib/types";
 import { eventBadgeStyle, eventPlaceholder } from "@/lib/event-styles";
 import { BackLink } from "@/components/BackLink";
 import { OtherDates } from "@/components/OtherDates";
+import { isPastEvent } from "@/lib/eventTiming";
 
 function isUsableImage(url?: string): boolean {
   if (!url) return false;
@@ -68,7 +69,8 @@ export default async function EventPage(
   const event = await getEventBySlug("sochi", slug);
   if (!event) notFound();
 
-  const siblings = await getSeriesSiblings("sochi", event, getCityToday("sochi"));
+  const today = getCityToday("sochi");
+  const siblings = await getSeriesSiblings("sochi", event, today);
 
   const placeholder = eventPlaceholder(event.type);
 
@@ -77,6 +79,15 @@ export default async function EventPage(
       <Header city="sochi" />
       <article className="mx-auto max-w-2xl px-4 pt-6 pb-12 flex-1 w-full">
         <BackLink city="sochi" />
+
+        {isPastEvent(event, today) && (
+          <div className="flex items-center justify-between gap-3 flex-wrap p-[13px_14px] bg-bg border border-border rounded-xl text-[13.5px] mb-5">
+            <span className="font-semibold">Событие прошло</span>
+            <a href={CITY_CONFIG.sochi.path} className="font-semibold text-accent hover:text-accent-hover">
+              Что идёт в Сочи →
+            </a>
+          </div>
+        )}
 
         <div className="relative aspect-[21/9] bg-bg rounded-[20px] overflow-hidden mb-5">
           {isUsableImage(event.imageUrl) ? (

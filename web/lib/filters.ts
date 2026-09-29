@@ -1,7 +1,8 @@
 /**
  * Фильтрация серий событий. Все вычисления дат — синхронные, делаются в
- * render-функции CityView (client component). SSR рендерит DEFAULT_FILTERS —
- * mismatch невозможен, т.к. дата/тип/цена читаются из URL только на клиенте.
+ * render-функции CityView (client component). SSR рендерит DEFAULT_FILTERS
+ * с today и nowMinutes сборки, первый клиентский рендер — те же значения
+ * (пропсы CityView); URL и часы браузера читаются только после монтирования.
  */
 
 import type { EventItem, EventType } from "./types";
