@@ -2,10 +2,10 @@
 
 Type: task
 Скилл: `superpowers:test-driven-development` — разметку собирает чистая функция (по образцу `venue-meta.ts`), её вывод фиксируется тестом первым
-Status: open (слот после p7/13, решение пользователя 2026-09-29)
+Status: resolved
 Blocked by: —
 Ветка: `feat/event-jsonld`
-Шаги пользователя: ждут — validator.schema.org на превью PR
+Шаги пользователя: —
 
 ## Question
 
@@ -55,7 +55,7 @@ Blocked by: —
 - **Экранирование:** `jsonLdScript` заменяет `<` на `\u003c` — название из источника с `</script>` не закрывает тег. У площадок (`components/VenueDetail.tsx:31`) та же дыра не тронута — вне тикета.
 - **Страницы:** в обеих `app/{perm,sochi}/events/[slug]/page.tsx` — `alternates.canonical` в `generateMetadata` и `<script type="application/ld+json">`. README п. 13 → ✅, дерево `lib/` дополнено.
 - **Проверка:** `event-meta.test.ts` (8 тестов) написан первым — красный (модуля нет) → зелёный. `npx vitest run` — 131 passed (было 123); `npm run build` проходит; `npm run lint` — одно старое предупреждение в `layout.tsx`. Preview (`next dev`): `/perm/events/kontsert-muzyka-nas-svyazala-2026-09-30` — canonical и `Event` со `startDate` `2026-09-30T17:00:00+05:00`, `offers.price` 0; `/sochi/events/mezhdunarodnaya-restorannaya-premiya-wheretoeat-yug-2026-2026-09-28` — `startDate` только датой, `addressLocality` «Сочи», консоль без ошибок. Домен в URL локально — фолбэк `afisha-site.ru` (как у площадок), на проде — `NEXT_PUBLIC_SITE_URL`.
-- **Не сделано сессией:** validator.schema.org — шаг пользователя по «Готово когда»; до него тикет `open`.
+- **Validator.schema.org** (2026-09-29, сессия по просьбе пользователя): JSON-LD со страницы превью PR #42 `/perm/events/kontsert-muzyka-nas-svyazala-2026-09-30` вставлен фрагментом кода — `Event`: «Нет ошибок, нет предупреждений». На превью canonical ведёт на `entertainment-eta.vercel.app`. Проверена одна страница (без `image`, с `startDate` со временем); вариант «только дата» и `image` проверены тестами и локально, не валидатором.
 - **Замечено по данным (не правилось):** у события Сочи `address` = название отеля, без улицы — в `streetAddress` уходит оно же; это зона p7/02.
 
 Локализация: `git grep -n -e "ld+json" -e canonical -e event-meta -e venue-meta -e SITE_URL -- web README.md`, найдено 9 мест (сверх тикета: `lib/dateUtil.ts` — приватная `CITY_TIMEZONES`, `lib/venue-styles.ts` — `isUsableImage`, README `:263` — дерево `lib/`; `sitemap.ts`/`robots.ts` со своими `SITE_URL` — не меняются)
