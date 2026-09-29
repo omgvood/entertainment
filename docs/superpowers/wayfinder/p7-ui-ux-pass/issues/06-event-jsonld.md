@@ -2,7 +2,7 @@
 
 Type: task
 Скилл: `superpowers:test-driven-development` — разметку собирает чистая функция (по образцу `venue-meta.ts`), её вывод фиксируется тестом первым
-Status: backlog (волна 2)
+Status: open (слот после p7/13, решение пользователя 2026-09-29)
 Blocked by: —
 Ветка: `feat/event-jsonld`
 
