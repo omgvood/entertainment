@@ -71,7 +71,24 @@ group by 1,2 order by 1 desc,2;
 
 ## Answer
 
-<Заполняется в конце сессии.>
+2026-09-29, ветка `fix/parser-silent-failures`. Кодовая часть сделана; тикет остаётся `open` до проверки на проде (ближайший прогон после мерджа) и до решения по Timepad.
 
-Локализация: `<команда>`, найдено N мест
-Расхождения цифр: <или «нет»>
+Локализация: `grep -n "failed = 1\|failed += \|failed=" parser/src/parser/pipeline.py` + `grep -rn "warnings\|last_error" parser/src parser/scripts parser/tests` + по значению `grep -rn "400/401/403"`, найдено 27 мест (20 веток сбоя в `pipeline.py`, 5 возвратов сбоя в `sources/generic.py`, `notify_warnings.py`, 1 абзац `README.md`).
+Расхождения цифр: да —
+- тикет назвал 11 веток `sub.failed += 1`, ещё 9 с `sub.failed = 1` (`:504, :516, :520, :527, :627, :637, :682, :977, :981`) пропущены;
+- `sources/generic.py` сам пишет строки `generic:<домен>` в `source_health` без `last_error` — в «Кто зависит» не было;
+- `last_error = "Отброшено spurious 'always'"` при `errors > 0` (vk-posts 26.09) — пропуск маскировал сбой;
+- путь `scripts/notify_warnings.py` не существует, файл — `parser/scripts/notify_warnings.py`;
+- **2ГИС** падает не «без причины»: лог GHA 27.09 — `meta.code=403 Authorization error, incorrect key` при HTTP 200, `TWOGIS_API_KEY` невалиден. Значит, и API-ветка `refresh-venues` не работает (предположение: спасает фолбэк Playwright при `source=auto`, не проверялось);
+- **Timepad**: тело 403 в CI — HTML-челлендж Cloudflare («Just a moment...»), а не JSON-ответ API. Гипотеза: блок по IP раннера, новый токен может не помочь — противоречит памяти `timepad-source`. Проверка `curl` без токена заблокирована харнессом, не выполнена.
+
+Что сделано:
+- `pipeline._record_failure(sub, source, reason, exc)` — единая точка сбоя: `failed += 1` + причина `"<источник>: <что>: <тип>: <текст>"[:200]`; заменены все 20 веток. Текст для HTTP 400/401/403 прежний.
+- `run_city`: несколько сбоев одного источника → одна строка «первый (+N)»: и `last_error`, и Telegram.
+- `generic.py`: `_run_domain`/`run_generic` возвращают причины вместо счётчика; `last_error` у `generic:<домен>` и у агрегата `generic`.
+- `seeds.yaml`: 9 источников `twogis-*` → `enabled: false`; `refresh-venues` их по-прежнему берёт (`_twogis_venue_sources` не смотрит на `enabled`), `refresh_venues.yml` не тронут.
+- `notify_warnings.py`: бэктик в тексте исключения заменяется на `'` — иначе Telegram Markdown отвечает 400 и алерт теряется.
+- Дайджест: решение пользователя — чтение B, «одно сообщение на город», уже так и было; правок не потребовало.
+- Тесты: +5 (`test_pipeline_warnings.py` ×3, `test_generic.py`, `test_config.py`), `cd parser && python -m pytest -q` → 303 passed.
+
+Не сделано / вне тикета: `batch.fetch.failed` и `discovery.failed` не увеличивают `failed` вовсе — сбой там невидим даже как `errors > 0`.

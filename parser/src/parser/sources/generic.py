@@ -91,6 +91,11 @@ def _update_listing_cache(supabase: Client, domain: str, url: str) -> None:
         log.warning("generic.cache.failed", domain=domain, error=str(exc))
 
 
+def _reason(source: str, what: str, exc: BaseException) -> str:
+    """Причина сбоя для source_health.last_error: у ConnectError str(exc) бывает пустым."""
+    return f"{source}: {what}: {type(exc).__name__}: {exc}"[:200]
+
+
 async def run_generic(
     client: httpx.AsyncClient,
     supabase: Client | None,
@@ -99,51 +104,52 @@ async def run_generic(
     *,
     domain_budget: int,
     llm_budget: int,
-) -> tuple[list[EventRow], int, int]:
-    """Парсит одобренные домены. Возвращает (строки, extracted, failed).
+) -> tuple[list[EventRow], int, list[str]]:
+    """Парсит одобренные домены. Возвращает (строки, extracted, причины сбоев).
 
     Health пишется per-domain (source='generic:{domain}'). В --dry-run (supabase=None)
     читать candidate_sources неоткуда — логируем skip и выходим.
     """
     if supabase is None:
         log.info("generic.skip", reason="нет supabase (--dry-run): candidate_sources недоступна")
-        return [], 0, 0
+        return [], 0, []
 
     domains = await load_approved_domains(supabase, city_slug, limit=domain_budget)
     if not domains:
         log.info("generic.no_domains", city=city_slug)
-        return [], 0, 0
+        return [], 0, []
 
     all_rows: list[EventRow] = []
     extracted = 0
-    failed = 0
+    failures: list[str] = []
     llm_left = llm_budget
 
     for cand in domains:
         domain = cand["domain"]
         started = time.perf_counter()
-        rows, used_llm, err = await _run_domain(
+        rows, used_llm, errs = await _run_domain(
             client, supabase, extractor, city_slug, cand, allow_llm=llm_left > 0
         )
         if used_llm:
             llm_left -= 1
         all_rows.extend(rows)
         extracted += len(rows)
-        failed += err
+        failures.extend(errs)
         record_source_health(
             supabase,
             f"generic:{domain}",
             city_slug,
             events_found=len(rows),
-            errors=err,
+            errors=len(errs),
             duration_sec=time.perf_counter() - started,
+            last_error=errs[0] if errs else None,
         )
 
     log.info(
         "generic.done", city=city_slug, domains=len(domains),
-        extracted=extracted, failed=failed, llm_used=llm_budget - llm_left,
+        extracted=extracted, failed=len(failures), llm_used=llm_budget - llm_left,
     )
-    return all_rows, extracted, failed
+    return all_rows, extracted, failures
 
 
 async def _run_domain(
@@ -154,14 +160,15 @@ async def _run_domain(
     candidate: dict,
     *,
     allow_llm: bool,
-) -> tuple[list[EventRow], bool, int]:
-    """Один домен: резолв URL → fetch (1 стр.) → JSON-LD → (бюджет) LLM. (rows, used_llm, errors)."""
+) -> tuple[list[EventRow], bool, list[str]]:
+    """Один домен: резолв URL → fetch (1 стр.) → JSON-LD → (бюджет) LLM. (rows, used_llm, причины сбоев)."""
     domain = candidate["domain"]
+    source = f"generic:{domain}"
 
     listing_url = await resolve_listing_url(client, domain, candidate)
     if not listing_url:
         log.warning("generic.no_listing", domain=domain)
-        return [], False, 1
+        return [], False, [f"{source}: листинг не найден"]
     _update_listing_cache(supabase, domain, listing_url)
 
     try:
@@ -169,12 +176,12 @@ async def _run_domain(
         resp.raise_for_status()
     except Exception as exc:  # noqa: BLE001
         log.warning("generic.fetch.failed", domain=domain, url=listing_url, error=str(exc))
-        return [], False, 1
+        return [], False, [_reason(source, f"fetch {listing_url}", exc)]
 
     content_hash = hashlib.sha256(resp.text.encode("utf-8")).hexdigest()
     if get_raw_document_hash(supabase, listing_url) == content_hash:
         log.info("generic.skip.unchanged", domain=domain, url=listing_url)
-        return [], False, 0
+        return [], False, []
 
     # JSON-LD (бесплатно) — этого хватит доменам с has_jsonld_event.
     parsed: list[ParsedEvent] = []
@@ -189,22 +196,22 @@ async def _run_domain(
     if not parsed:
         if not allow_llm:
             log.info("generic.llm.budget_exhausted", domain=domain)
-            return [], False, 0
+            return [], False, []
         used_llm = True
         try:
             parsed = await extractor.extract_many(resp.text, listing_url)
         except ExtractorError as exc:
             log.warning("generic.extract.skipped", domain=domain, reason=str(exc))
-            return [], used_llm, 1
+            return [], used_llm, [_reason(source, "LLM", exc)]
         except Exception as exc:  # noqa: BLE001
             log.error("generic.extract.failed", domain=domain, error=str(exc))
-            return [], used_llm, 1
+            return [], used_llm, [_reason(source, "LLM", exc)]
         log.info("generic.extract.ok", domain=domain, count=len(parsed))
 
     save_raw_document(supabase, f"generic:{domain}", listing_url, resp.text, "html", content_hash)
 
     rows: list[EventRow] = []
-    errors = 0
+    errors: list[str] = []
     for p in parsed:
         try:
             # source_url = ссылка на само событие (event_url из JSON-LD/LLM), иначе листинг.
@@ -215,6 +222,6 @@ async def _run_domain(
                 continue
             rows.append(row)
         except Exception as exc:  # noqa: BLE001
-            errors += 1
+            errors.append(_reason(source, f"строка {p.title!r}", exc))
             log.warning("generic.row.invalid", domain=domain, title=p.title, error=str(exc))
     return rows, used_llm, errors
