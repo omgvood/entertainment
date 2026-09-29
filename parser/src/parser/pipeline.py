@@ -169,6 +169,16 @@ def _safe_to_event_row(
     return row
 
 
+def _record_failure(
+    sub: "PipelineResult", source: str, reason: str, exc: BaseException | None = None
+) -> None:
+    """Сбой источника: счётчик + причина (→ source_health.last_error и Telegram-алерт)."""
+    sub.failed += 1
+    if exc is not None:
+        reason = f"{reason}: {type(exc).__name__}: {exc}"  # у ConnectError str(exc) бывает пустым
+    sub.warnings.append(f"{source}: {reason}"[:200])  # varchar(255) в source_health + лимит Telegram
+
+
 @dataclass
 class PipelineResult:
     discovered: int = 0
@@ -287,6 +297,9 @@ async def run_city(
             result.failed += sub.failed
             result.skipped_always += sub.skipped_always
             result.skipped_non_event += sub.skipped_non_event
+            # Один источник — одна строка: иначе сбои по чанкам/строкам заливают Telegram.
+            if len(sub.warnings) > 1:
+                sub.warnings = [f"{sub.warnings[0]} (+{len(sub.warnings) - 1})"]
             result.warnings.extend(sub.warnings)
             if sub.skipped_always:
                 log.info("source.skipped_always", source=source.name, count=sub.skipped_always)
@@ -469,10 +482,10 @@ async def _run_per_url_source(
                 save_raw_document(supabase, d.source, d.url, resp.text, "html")
             log.info("extract.ok", url=d.url, title=parsed.title)
         except ExtractorError as exc:
-            sub.failed += 1
+            _record_failure(sub, source.name, f"extract {d.url}", exc)
             log.warning("extract.skipped", url=d.url, reason=str(exc))
         except Exception as exc:  # noqa: BLE001
-            sub.failed += 1
+            _record_failure(sub, source.name, f"extract {d.url}", exc)
             log.error("extract.failed", url=d.url, error=str(exc))
 
     return rows, sub
@@ -501,30 +514,28 @@ async def _run_direct_api_source(
         items = await _fetch_direct_api_items(client, source, city_slug, provider_keys)
     except _DirectApiConfigError as exc:
         log.error("direct_api.config", source=source.name, reason=str(exc))
-        sub.failed = 1
+        _record_failure(sub, source.name, f"конфиг: {exc}")
         return [], sub
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status in (400, 401, 403):
             # 400 — тоже критичен: некоторые шлюзы возвращают Bad Request на невалидный/отозванный токен
-            msg = f"{source.name}: HTTP {status} — проверь токен/ключ API"
             log.error("direct_api.auth_error", source=source.name, status=status)
-            sub.failed = 1
-            sub.warnings.append(msg[:200])  # varchar(255) в source_health + лимит Telegram
+            _record_failure(sub, source.name, f"HTTP {status} — проверь токен/ключ API")
             return [], sub
         log.error("direct_api.failed", source=source.name, error=str(exc))
-        sub.failed = 1
+        _record_failure(sub, source.name, "HTTP", exc)
         return [], sub
     except Exception as exc:  # noqa: BLE001
         log.error("direct_api.failed", source=source.name, error=str(exc))
-        sub.failed = 1
+        _record_failure(sub, source.name, "запрос API", exc)
         return [], sub
 
     if items is None:
         log.error(
             "direct_api.unknown_provider", source=source.name, provider=source.provider
         )
-        sub.failed = 1
+        _record_failure(sub, source.name, f"неизвестный провайдер {source.provider!r}")
         return [], sub
 
     log.info("direct_api.ok", source=source.name, provider=source.provider, count=len(items))
@@ -543,7 +554,7 @@ async def _run_direct_api_source(
                     rows.append(row)
                     sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
-            sub.failed += 1
+            _record_failure(sub, source.name, f"строка {parsed.title!r}", exc)
             log.warning("direct_api.row_invalid", title=parsed.title, error=str(exc))
 
     if venues:
@@ -624,7 +635,7 @@ async def _run_vk_events_source(
     sub = PipelineResult()
     if not vk_service_key:
         log.error("vk_events.config", source=source.name, reason="нет VK_SERVICE_KEY")
-        sub.failed = 1
+        _record_failure(sub, source.name, "нет VK_SERVICE_KEY")
         return [], sub
 
     city_name = vk_mod.CITY_NAMES.get(city_slug, city_slug)
@@ -634,7 +645,7 @@ async def _run_vk_events_source(
         )
     except Exception as exc:  # noqa: BLE001
         log.error("vk_events.failed", source=source.name, error=str(exc))
-        sub.failed = 1
+        _record_failure(sub, source.name, "поиск групп", exc)
         return [], sub
 
     rows: list[EventRow] = []
@@ -650,7 +661,7 @@ async def _run_vk_events_source(
                 rows.append(row)
                 sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
-            sub.failed += 1
+            _record_failure(sub, source.name, f"строка {parsed.title!r}", exc)
             log.warning("vk_events.row.invalid", title=parsed.title, error=str(exc))
 
     log.info("vk_events.ok", source=source.name, groups=len(groups), extracted=sub.extracted)
@@ -679,7 +690,7 @@ async def _run_vk_posts_source(
     sub = PipelineResult()
     if not vk_service_key:
         log.error("vk_posts.config", source=source.name, reason="нет VK_SERVICE_KEY")
-        sub.failed = 1
+        _record_failure(sub, source.name, "нет VK_SERVICE_KEY")
         return [], sub
     if not source.vk_groups:
         log.warning("vk_posts.no_groups", source=source.name)
@@ -696,7 +707,7 @@ async def _run_vk_posts_source(
             continue
         except Exception as exc:  # noqa: BLE001
             log.error("vk_posts.group.failed", group=screen, error=str(exc))
-            sub.failed += 1
+            _record_failure(sub, source.name, f"группа {screen}", exc)
             continue
 
         # Префильтр: свежие посты-кандидаты, ещё не обработанные (raw_documents по хешу текста).
@@ -735,7 +746,7 @@ async def _run_vk_posts_source(
         for result in results:
             if isinstance(result, Exception):  # BaseException захватил бы CancelledError
                 # Сбой чанка (rate-limit/парс) — посты НЕ помечаем, ретраим в след. прогоне.
-                sub.failed += 1
+                _record_failure(sub, source.name, f"LLM, группа {screen}", result)
                 log.error("vk_posts.extract.failed", group=screen, error=str(result), exc_info=result)
                 continue
             # isinstance+continue выше сужают тип до tuple — распаковка безопасна.
@@ -771,7 +782,7 @@ async def _run_vk_posts_source(
                     rows.append(row)
                     sub.extracted += 1
                 except Exception as exc:  # noqa: BLE001
-                    sub.failed += 1
+                    _record_failure(sub, source.name, f"строка {parsed.title!r}", exc)
                     log.warning("vk_posts.row.invalid", title=parsed.title, error=str(exc))
 
     log.info("vk_posts.ok", source=source.name, extracted=sub.extracted)
@@ -811,7 +822,7 @@ async def _run_telegram_posts_source(
             posts = await provider.fetch_posts(ch.channel, count=100)
         except Exception as exc:  # noqa: BLE001
             log.error("telegram_posts.channel.failed", channel=ch.channel, error=str(exc))
-            sub.failed += 1
+            _record_failure(sub, source.name, f"канал {ch.channel}", exc)
             continue
 
         # Префильтр: свежие посты-кандидаты, ещё не обработанные (raw_documents по хешу текста).
@@ -851,7 +862,7 @@ async def _run_telegram_posts_source(
         for result in results:
             if isinstance(result, Exception):  # BaseException захватил бы CancelledError
                 # Сбой чанка (rate-limit/парс) — посты НЕ помечаем, ретраим в след. прогоне.
-                sub.failed += 1
+                _record_failure(sub, source.name, f"LLM, канал {ch.channel}", result)
                 log.error("telegram_posts.extract.failed", channel=ch.channel, error=str(result), exc_info=result)
                 continue
             # isinstance+continue выше сужают тип до tuple — распаковка безопасна.
@@ -887,7 +898,7 @@ async def _run_telegram_posts_source(
                     rows.append(row)
                     sub.extracted += 1
                 except Exception as exc:  # noqa: BLE001
-                    sub.failed += 1
+                    _record_failure(sub, source.name, f"строка {parsed.title!r}", exc)
                     log.warning("telegram_posts.row.invalid", title=parsed.title, error=str(exc))
 
     log.info("telegram_posts.ok", source=source.name, extracted=sub.extracted)
@@ -905,12 +916,13 @@ async def _run_generic_source(
 ) -> tuple[list[EventRow], PipelineResult]:
     """Одобренные в candidate_sources домены → JSON-LD / LLM (длинный хвост)."""
     sub = PipelineResult()
-    rows, extracted, failed = await run_generic(
+    rows, extracted, failures = await run_generic(
         client, supabase, extractor, city_slug,
         domain_budget=domain_budget, llm_budget=llm_budget,
     )
     sub.extracted = extracted
-    sub.failed = failed
+    sub.failed = len(failures)
+    sub.warnings = failures
     sub.discovered = len(rows)
     sub.new = extracted
     return rows, sub
@@ -974,11 +986,11 @@ async def _run_batch_source(
             parsed_events = await extractor.extract_many(html, source.url)
         except ExtractorError as exc:
             log.warning("batch.extract.skipped", source=source.name, reason=str(exc))
-            sub.failed = 1
+            _record_failure(sub, source.name, "LLM", exc)
             return [], sub
         except Exception as exc:  # noqa: BLE001
             log.error("batch.extract.failed", source=source.name, error=str(exc))
-            sub.failed = 1
+            _record_failure(sub, source.name, "LLM", exc)
             return [], sub
 
         log.info(
@@ -1019,7 +1031,7 @@ async def _run_batch_source(
             rows.append(row)
             sub.extracted += 1
         except Exception as exc:  # noqa: BLE001
-            sub.failed += 1
+            _record_failure(sub, source.name, f"строка {parsed.title!r}", exc)
             log.warning("batch.row.invalid", title=parsed.title, error=str(exc))
 
     sub.discovered = len(parsed_events)

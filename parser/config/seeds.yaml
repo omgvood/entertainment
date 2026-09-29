@@ -34,6 +34,7 @@ cities:
       # 2ГИС — места «всегда» (Сочи)
       - name: twogis-bowling
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "боулинг Сочи"
         event_type: bowling
@@ -41,6 +42,7 @@ cities:
 
       - name: twogis-billiards
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "бильярд Сочи"
         event_type: billiards
@@ -48,6 +50,7 @@ cities:
 
       - name: twogis-karting
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "картинг Сочи"
         event_type: karting
@@ -128,6 +131,7 @@ cities:
       # 2ГИС — места «всегда» (боулинг/бильярд/картинг)
       - name: twogis-bowling
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "боулинг Пермь"
         event_type: bowling
@@ -135,6 +139,7 @@ cities:
 
       - name: twogis-billiards
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "бильярд Пермь"
         event_type: billiards
@@ -142,6 +147,7 @@ cities:
 
       - name: twogis-karting
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "картинг Пермь"
         event_type: karting
@@ -152,6 +158,7 @@ cities:
       # event_type=sport (нет отдельных типов в EventType). Проверять по parse_warnings/coverage.
       - name: twogis-skalodrom
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "скалодром Пермь"
         event_type: sport
@@ -159,6 +166,7 @@ cities:
 
       - name: twogis-batut
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "батутный центр Пермь"
         event_type: sport
@@ -166,6 +174,7 @@ cities:
 
       - name: twogis-tenis
         extraction_mode: direct_api
+        enabled: false  # площадки собирает refresh-venues; в событийном прогоне не нужны
         provider: twogis
         api_query: "теннисный клуб Пермь"
         event_type: sport
