@@ -105,6 +105,35 @@ def test_score_pair_different_venue_cuts_score():
     assert score_pair(a, b).score < MERGE
 
 
+@pytest.mark.parametrize(
+    "title_a,venue_a,title_b,venue_b",
+    [
+        # Кросс-источниковые пары из dedup_candidates (p2/14): название совпало,
+        # площадку источники назвали по-разному.
+        ("«Максим Дмитриев. Хроникер»", "Пермский ТЮЗ",
+         "Спектакль «Максим Дмитриев. Хроникер»", "Малая сцена Пермского ТЮЗа"),
+        ("Торжественная церемония награждения победителей конкурса «Музейный Олимп»",
+         "Пермь", "Церемония награждения конкурса «Музейный Олимп»", "Пермская галерея"),
+    ],
+)
+def test_score_pair_exact_title_merges_despite_venue_wording(
+    title_a, venue_a, title_b, venue_b
+):
+    a = _row(title_a, venue_a, source="telegram-posts")
+    b = _row(title_b, venue_b, source="vk-posts")
+    assert score_pair(a, b).score >= MERGE
+
+
+def test_score_pair_series_episodes_stay_candidates():
+    """Разные экскурсии одного цикла: длинный общий префикс, площадка дословно одна.
+    Самая похожая пара из dedup_candidates (title_score 0.842) — не должна слиться."""
+    a = _row("Цикл авторских экскурсий «Балетный квартал». Театральный сад",
+             "Пермский театр оперы и балета им. П. И. Чайковского", "12:00", source="permopera")
+    b = _row("Цикл авторских экскурсий «Балетный квартал». Учебный квартал",
+             "Пермский театр оперы и балета им. П. И. Чайковского", "12:00", source="permopera")
+    assert CANDIDATE <= score_pair(a, b).score < MERGE
+
+
 def test_score_pair_without_any_supporting_signal_is_damped():
     """Ни площадки, ни времени — сливать по одному названию рискованно."""
     a = _row("Лекция о космосе", "")

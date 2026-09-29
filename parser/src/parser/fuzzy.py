@@ -177,6 +177,11 @@ def score_pair(
     has_venues = bool(a.venue_name.strip()) and bool(b.venue_name.strip())
     venue = text_score(a.venue_name, b.venue_name) if has_venues else 0.0
     factor = _venue_factor(venue) if has_venues else 1.0
+    # Название совпало, площадка похожа лишь частично — источники назвали её по-разному
+    # («Пермский ТЮЗ» / «Малая сцена Пермского ТЮЗа»). Совсем чужая площадка штрафуется
+    # по-прежнему: одноимённый стендап в двух барах — два события.
+    if title == 1.0 and venue > 0.3:
+        factor = 1.0
 
     # Ни площадки, ни времени не подтвердили совпадение — сливать по одному названию рискованно.
     reason = "ok"
