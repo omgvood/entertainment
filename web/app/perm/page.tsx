@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { CityView } from "@/components/CityView";
 import { Header } from "@/components/Header";
 import { getEventsByCity, getCityToday } from "@/lib/events";
+import { getCityNowMinutes } from "@/lib/dateUtil";
 import { getVenuesByCity } from "@/lib/venues";
 import { CITY_CONFIG } from "@/lib/types";
 
@@ -25,7 +26,7 @@ export default async function PermPage() {
   return (
     <>
       <Header city="perm" />
-      <CityView events={events} venues={venues} city="perm" today={today} />
+      <CityView events={events} venues={venues} city="perm" today={today} nowMinutes={getCityNowMinutes("perm")} />
       <footer className="bg-surface border-t border-border py-5 text-center text-[13px] text-muted">
         Афиша · 2026
       </footer>

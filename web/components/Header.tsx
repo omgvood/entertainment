@@ -6,13 +6,10 @@ export function Header({ city }: { city?: City }) {
     <header className="sticky top-0 z-10 bg-surface border-b border-border">
       <div className="mx-auto max-w-[1440px] px-4 py-3.5 flex items-center gap-4 flex-wrap">
         <a
-          href="/"
+          href={city ? CITY_CONFIG[city].path : "/"}
           className="flex items-baseline gap-[2px] font-extrabold text-xl tracking-tight text-ink whitespace-nowrap"
         >
           Афиша
-          <span className="bg-gradient-to-r from-accent to-[#8b5cf6] bg-clip-text text-transparent">
-            .PRM
-          </span>
         </a>
 
         <nav className="flex gap-1" aria-label="Выбор города">

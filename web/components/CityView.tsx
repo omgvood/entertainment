@@ -31,12 +31,14 @@ interface CityViewProps {
   city: City;
   /** «Сегодня» на момент сборки (getCityToday). После монтирования пересчитывается — сборка могла не пройти. */
   today: string;
+  /** Минуты от полуночи города на момент сборки (getCityNowMinutes) — первый клиентский рендер совпадает с серверным HTML. */
+  nowMinutes: number;
 }
 
-export function CityView({ events, venues, city, today: buildToday }: CityViewProps) {
+export function CityView({ events, venues, city, today: buildToday, nowMinutes: buildNowMinutes }: CityViewProps) {
   const [today, setToday] = useState(buildToday);
   /** Минуты от полуночи в таймзоне города — как today, посчитаны при сборке и пересчитаны после монтирования. */
-  const [nowMinutes, setNowMinutes] = useState(() => getCityNowMinutes(city));
+  const [nowMinutes, setNowMinutes] = useState(buildNowMinutes);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [query, setQuery] = useState("");
   // Статический HTML один на все query-строки, поэтому URL читается только

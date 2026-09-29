@@ -70,3 +70,11 @@ export function isAvailable(
   const status = eventTimeStatus(event, today, nowMinutes);
   return !(status.kind === "started" && status.stale);
 }
+
+/**
+ * Событие прошло — его день раньше «сегодня» города. Страница такого события
+ * ещё открывается (парсер держит прошедшие сутки), но показывает плашку.
+ */
+export function isPastEvent(event: Pick<EventItem, "date">, today: string): boolean {
+  return event.date !== "always" && event.date < today;
+}
