@@ -60,3 +60,5 @@ Blocked by: —
 
 Локализация: `git grep -n -e "ld+json" -e canonical -e event-meta -e venue-meta -e SITE_URL -- web README.md`, найдено 9 мест (сверх тикета: `lib/dateUtil.ts` — приватная `CITY_TIMEZONES`, `lib/venue-styles.ts` — `isUsableImage`, README `:263` — дерево `lib/`; `sitemap.ts`/`robots.ts` со своими `SITE_URL` — не меняются)
 Расхождения цифр: строки `alt` в `[slug]/page.tsx` съехали с 83/85 на 94/96 (к этому тикету не относятся); иначе нет
+
+- **Проверено на проде 2026-10-03:** `/perm/events/kontsert-k-100-letiyu-lyudmily-saharovoy-2026-10-03` — `script[type="application/ld+json"]` с `Event` (name, startDate, url), `link[rel=canonical]` на `entertainment-eta.vercel.app`; страница отдала 200.

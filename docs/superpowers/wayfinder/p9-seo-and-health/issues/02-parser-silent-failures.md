@@ -92,3 +92,5 @@ group by 1,2 order by 1 desc,2;
 - Тесты: +5 (`test_pipeline_warnings.py` ×3, `test_generic.py`, `test_config.py`), `cd parser && python -m pytest -q` → 303 passed.
 
 Не сделано / вне тикета: `batch.fetch.failed` и `discovery.failed` не увеличивают `failed` вовсе — сбой там невидим даже как `errors > 0`.
+
+- **Проверено на проде 2026-10-03 (частично):** по `source_health` за 4 прогона (30.09–03.10) нет строк `errors > 0` с `last_error is null` и нет строк `twogis-*` (0 из 14 источников в сутки). **Не проверено:** сообщение в Telegram (одно на город, разметка) — в логе `parse.yml` от 01.10 в шаге уведомления `TG_BOT_TOKEN`/`TG_CHAT_ID` пустые, а не `***` (гипотеза: секреты не заданы). Тикет `open` из-за Timepad и этого пункта.

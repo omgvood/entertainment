@@ -66,3 +66,5 @@ order by title_score desc;
 
 Локализация: `grep -rn "score_pair\|_venue_factor\|DEDUP_MERGE_SCORE\|DEDUP_CANDIDATE_SCORE" --include=*.py parser/` + `grep -rn "title_score\|Балетный квартал" --include=*.py parser/` + SQL по `dedup_candidates`, найдено 12 мест (`fuzzy.py` ×3, `merge.py:193`, `pipeline.py:384`, `cli.py:598`, `config.py:36-39`, `db.py:463`, `test_fuzzy.py` ×2 — в т.ч. `different_venue_cuts_score`, не названный в тикете, — `test_permopera.py:51`, `test_merge.py`/`test_db.py`/`test_pipeline_warnings.py` через `cluster_events`) — менялись 2 (`fuzzy.py`, `test_fuzzy.py`).
 Расхождения цифр: да — пар с `title_score == 1.000` сейчас 2, а не 6 (таблица пересчитывается ежедневно); всего `candidate` 14, а не 19, из них «Балетный квартал» 7.
+
+- **Проверено на проде 2026-10-03:** по `dedup_candidates` с `last_seen_at > 2026-09-29 20:00 UTC` пары «Музейный Олимп» (venue_score 0.400) и «Хроникер» (0.529) — `auto_merge`. `candidate` 11 (было 14), `auto_merge` 48 — остаток не вырос, вопрос о разрешателе не возвращается.

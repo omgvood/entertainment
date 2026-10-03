@@ -81,3 +81,5 @@ Blocked by: —
 
 Локализация: `grep -rn -E "getCityNowMinutes|nowMinutes|<Header|notFound\(|getCityToday|isPast|eventTiming" app components lib` + по значению `grep -rn -E "\.PRM|href=\"/\"|not-found|прошло|mismatch" app components lib ../docs/superpowers/specs`, найдено 12 мест (сверх тикета: `venues/[slug]/page.tsx` ×2, спек палитры `:73`, `:138`)
 Расхождения цифр: нет
+
+- **Проверено на проде 2026-10-03** (после ночных прогонов): консоль `/perm` и `/sochi` без ошибок, #418 нет; `/chto-ugodno` — русская 404; логотип на `/sochi` ведёт на `/sochi`.
